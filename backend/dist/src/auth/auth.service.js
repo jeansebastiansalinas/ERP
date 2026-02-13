@@ -45,46 +45,60 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const common_1 = require("@nestjs/common");
 const bcrypt = __importStar(require("bcrypt"));
-const prisma_service_1 = require("../prisma/prisma.service");
+const jwt_1 = require("@nestjs/jwt");
+const users_service_1 = require("../users/users.service");
 let AuthService = class AuthService {
-    prisma;
-    constructor(prisma) {
-        this.prisma = prisma;
+    usersService;
+    jwtService;
+    constructor(usersService, jwtService) {
+        this.usersService = usersService;
+        this.jwtService = jwtService;
     }
     async register(dto) {
-        const existingUser = await this.prisma.user.findUnique({
-            where: { email: dto.email },
-        });
+        const existingUser = await this.usersService.findByEmail(dto.email);
         if (existingUser) {
             throw new common_1.BadRequestException('Email ya registrado');
         }
-        const roleExists = await this.prisma.role.findUnique({
-            where: { name: dto.role },
-        });
-        if (!roleExists) {
-            throw new common_1.BadRequestException(`Rol inválido: ${dto.role}`);
-        }
         const hashedPassword = await bcrypt.hash(dto.password, 10);
-        const user = await this.prisma.user.create({
-            data: {
-                email: dto.email,
-                passwordHash: hashedPassword,
-                name: dto.name,
-                role: {
-                    connect: { name: dto.role },
-                },
-            },
-            include: {
-                role: true,
-            },
+        const user = await this.usersService.createUser({
+            email: dto.email,
+            passwordHash: hashedPassword,
+            name: dto.name,
+            role: dto.role,
         });
         const { passwordHash, ...safeUser } = user;
         return safeUser;
+    }
+    async login(dto) {
+        const user = await this.usersService.findByEmailWithRole(dto.email);
+        if (!user) {
+            throw new common_1.UnauthorizedException('Credenciales inválidas');
+        }
+        const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+        if (!isPasswordValid) {
+            throw new common_1.UnauthorizedException('Credenciales inválidas');
+        }
+        const payload = {
+            sub: user.id,
+            email: user.email,
+            role: user.role.name,
+        };
+        const accessToken = this.jwtService.sign(payload);
+        return {
+            accessToken,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role.name,
+            },
+        };
     }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [users_service_1.UsersService,
+        jwt_1.JwtService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map
