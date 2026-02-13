@@ -2,6 +2,11 @@
 /dist
 /node_modules
 /build
+node_modules/
+
+# Builds
+backend/dist/
+frontend/.next/
 
 # Logs
 logs
