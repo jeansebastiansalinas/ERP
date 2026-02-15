@@ -1,0 +1,110 @@
+/* ========================================
+   ANIMACIONES GLOBALES - ERP Business Insight
+   ======================================== */
+
+/* Shimmer - Efecto de brillo deslizante */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Spin Slow - Rotación lenta continua */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Shake - Vibración horizontal para errores */
+@keyframes shake {
+  0%, 100% { 
+    transform: translateX(0); 
+  }
+  10%, 30%, 50%, 70%, 90% { 
+    transform: translateX(-4px); 
+  }
+  20%, 40%, 60%, 80% { 
+    transform: translateX(4px); 
+  }
+}
+
+/* Pulse Error - Pulso de opacidad para fondos de error */
+@keyframes pulse-error {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Bounce Subtle - Rebote suave vertical */
+@keyframes bounce-subtle {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* Progress Bar - Barra de progreso que se vacía */
+@keyframes progress-bar {
+  0% {
+    width: 100%;
+  }
+  100% {
+    width: 0%;
+  }
+}
+
+/* Slide In Right - Entrada desde la derecha */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ========================================
+   CLASES DE UTILIDAD
+   ======================================== */
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+.animate-shake {
+  animation: shake 0.5s;
+}
+
+.animate-pulse-error {
+  animation: pulse-error 2s ease-in-out infinite;
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 1s ease-in-out infinite;
+}
+
+.animate-progress-bar {
+  animation: progress-bar 5s linear forwards;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}

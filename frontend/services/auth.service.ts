@@ -1,14 +1,39 @@
-import { api } from '@/lib/api';
+import { AuthResponse, LoginData, RegisterData } from '@/types/auth';
 
-export interface LoginResponse {
-  access_token: string;
-}
+const API_URL = 'http://localhost:3000/api';
 
-export async function login(email: string, password: string) {
-  const response = await api.post<LoginResponse>('/auth/login', {
-    email,
-    password,
+// =========================
+// LOGIN
+// =========================
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const response = await fetch(`${API_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
   });
 
-  return response.data;
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Credenciales inválidas');
+  }
+
+  return response.json();
+}
+
+// =========================
+// REGISTER
+// =========================
+export async function register(data: RegisterData): Promise<{ id: number; email: string; name: string | null; role: string }> {
+  const response = await fetch(`${API_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Error al registrar usuario');
+  }
+
+  return response.json();
 }
