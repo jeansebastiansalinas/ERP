@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/* ===================== */
+/*        ENUMS          */
+/* ===================== */
+
 enum RoleName {
   SUPER_ADMIN
   ADMIN
@@ -14,31 +18,67 @@ enum RoleName {
   COMPRADOR
 }
 
+enum OrderStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DELIVERED
+}
+
+enum TipoProducto {
+  DIESEL
+  GASOLINA_CORRIENTE
+  GASOLINA_EXTRA
+  JET_FUEL
+  GLP
+}
+
+enum EstadoOferta {
+  ACTIVA
+  PAUSADA
+  VENDIDA
+  EXPIRADA
+}
+
+/* ===================== */
+/*        MODELS         */
+/* ===================== */
+
 model Role {
-  id          Int        @id @default(autoincrement())
-  name        RoleName   @unique
+  id          Int      @id @default(autoincrement())
+  name        RoleName @unique
   description String?
-  users       User[]
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime @default(now())
+
+  // relations
+  users User[]
 }
 
 model User {
-  id           Int        @id @default(autoincrement())
-  email        String     @unique
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
   passwordHash String
   name         String?
-  isActive     Boolean    @default(true)
+  isActive     Boolean  @default(true)
 
-  roleId       Int
-  role         Role       @relation(fields: [roleId], references: [id])
+  roleId Int
+  role   Role @relation(fields: [roleId], references: [id])
 
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // 🔁 Relación inversa
-  orders       Order[]    @relation("UserOrders")
+  // ✅ Relations EXISTENTES (NO TOCAR)
+  orders            Order[]           @relation("UserOrders")
+  ofertasVenta      OfertaVenta[]     @relation("OfertasVendedor")
+  solicitudesCompra SolicitudCompra[] @relation("SolicitudesComprador")
+
+  // 🆕 AGREGAR ESTAS 3 LÍNEAS NUEVAS:
+  negociacionesVendedor  Negociacion[] @relation("NegociacionVendedor")
+  negociacionesComprador Negociacion[] @relation("NegociacionComprador")
+  calificacionesHechas   Calificacion[] @relation("CalificacionesHechas")
+  calificacionesRecibidas Calificacion[] @relation("CalificacionesRecibidas")
+  notificaciones          Notificacion[] @relation("NotificacionesUsuario")
 }
-
 
 model Client {
   id           Int      @id @default(autoincrement())
@@ -49,8 +89,8 @@ model Client {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  // 🔁 Relación inversa
-  orders       Order[]
+  // relations
+  orders Order[]
 }
 
 model Product {
@@ -61,50 +101,282 @@ model Product {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  // 🔁 Relación inversa
-  orders    Order[]
-}
-
-enum OrderStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  DELIVERED
+  // relations
+  orders Order[]
 }
 
 model Order {
-  id          Int         @id @default(autoincrement())
+  id         Int         @id @default(autoincrement())
+  quantity   Float
+  totalPrice Float
+  status     OrderStatus @default(PENDING)
 
-  quantity    Float
-  totalPrice  Float
+  clientId Int
+  client   Client @relation(fields: [clientId], references: [id])
 
-  status      OrderStatus @default(PENDING)
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
 
-  clientId    Int
-  client      Client      @relation(fields: [clientId], references: [id])
+  createdById Int?
+  createdBy   User? @relation("UserOrders", fields: [createdById], references: [id])
 
-  productId   Int
-  product     Product     @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
 
-  createdById Int
-  createdBy   User        @relation("UserOrders", fields: [createdById], references: [id])
-
-  createdAt   DateTime    @default(now())
-
-  invoice     Invoice?
+  // relations
+  invoice Invoice?
 }
 
 model Invoice {
-  id           Int      @id @default(autoincrement())
+  id      Int   @id @default(autoincrement())
+  orderId Int   @unique
+  order   Order @relation(fields: [orderId], references: [id])
 
-  orderId      Int      @unique
-  order        Order    @relation(fields: [orderId], references: [id])
+  clientName  String
+  productName String
+  unitPrice   Decimal
+  quantity    Float
+  totalAmount Decimal
 
-  clientName   String
-  productName  String
-  unitPrice    Decimal
-  quantity     Float
-  totalAmount  Decimal
+  createdAt DateTime @default(now())
+}
 
-  createdAt    DateTime @default(now())
+model OfertaVenta {
+  id              String       @id @default(uuid())
+  tipoProducto    TipoProducto
+  cantidad        Float
+  precioUnitario  Decimal
+  ubicacion       String
+  pais            String
+  ciudad          String
+  fechaDisponible DateTime
+  fechaExpiracion DateTime?
+  descripcion     String?
+  incluyeFlete    Boolean      @default(false)
+  radioEntrega    Float?
+  estado          EstadoOferta @default(ACTIVA)
+
+  vendedorId Int
+  vendedor   User @relation("OfertasVendedor", fields: [vendedorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  negociaciones     Negociacion[]
+
+  @@index([vendedorId])
+  @@index([tipoProducto])
+  @@index([estado])
+}
+
+
+model SolicitudCompra {
+  id               String       @id @default(uuid())
+  tipoProducto     TipoProducto
+  cantidadRequerida Float
+  precioMaximo     Decimal
+  pais             String
+  ciudad           String
+  direccionEntrega String
+  fechaRequerida   DateTime
+  fechaExpiracion  DateTime?
+  descripcion      String?
+  estado           EstadoOferta @default(ACTIVA)
+
+  compradorId      Int
+  comprador        User         @relation("SolicitudesComprador", fields: [compradorId], references: [id])
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  negociaciones     Negociacion[]
+  
+  @@index([compradorId])
+  @@index([tipoProducto])
+  @@index([estado])
+}
+
+// ═══════════════════════════════════════════════
+// NEGOCIACIONES Y ENVÍOS
+// ═══════════════════════════════════════════════
+
+model Negociacion {
+  id                String             @id @default(uuid())
+  
+  // Participantes
+  vendedorId        Int
+  vendedor          User               @relation("NegociacionVendedor", fields: [vendedorId], references: [id])
+  
+  compradorId       Int
+  comprador         User               @relation("NegociacionComprador", fields: [compradorId], references: [id])
+  
+  // Origen (oferta o solicitud)
+  ofertaId          String?
+  oferta            OfertaVenta?       @relation(fields: [ofertaId], references: [id])
+  
+  solicitudId       String?
+  solicitud         SolicitudCompra?   @relation(fields: [solicitudId], references: [id])
+  
+  // Detalles acordados
+  tipoProducto      TipoProducto
+  cantidad          Int                // cantidad negociada (puede ser menor a la oferta)
+  precioUnitario    Decimal            @db.Decimal(10, 2)
+  incluyeFlete      Boolean            @default(false)
+  costoFlete        Decimal?           @db.Decimal(10, 2)
+  
+  // Ubicación de entrega
+  direccionEntrega  String
+  ciudad            String
+  pais              String
+  
+  // Estado de la negociación
+  estado            EstadoNegociacion  @default(ESPERANDO_CONFIRMACION)
+  
+  // Metadata
+  notasVendedor     String?
+  notasComprador    String?
+  
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  
+  // Relaciones
+  envio             Envio?
+  factura           Factura?
+  notificaciones    Notificacion[] @relation("NotificacionesNegociacion")
+  
+  @@index([vendedorId])
+  @@index([compradorId])
+  @@index([estado])
+}
+
+enum EstadoNegociacion {
+  ESPERANDO_CONFIRMACION  // Cliente mostró interés, esperando vendedor
+  CONFIRMADA              // Ambos aceptaron
+  RECHAZADA               // Vendedor rechazó
+  CANCELADA               // Cliente canceló
+  COMPLETADA              // Todo el proceso terminó
+}
+
+model Envio {
+  id                String        @id @default(uuid())
+  
+  negociacionId     String        @unique
+  negociacion       Negociacion   @relation(fields: [negociacionId], references: [id])
+  
+  // Ruta
+  origen            String
+  origenLat         Float?
+  origenLng         Float?
+  
+  destino           String
+  destinoLat        Float?
+  destinoLng        Float?
+  
+  // Transporte
+  conductorNombre   String?
+  conductorTelefono String?
+  vehiculoPlaca     String?
+  vehiculoTipo      String?
+  
+  // Tracking
+  estadoEnvio       EstadoEnvio   @default(PENDIENTE)
+  progresoEstimado  Int?          // 0-100%
+  
+  // Fechas
+  fechaSalida       DateTime?
+  fechaEntregaEst   DateTime?
+  fechaEntregaReal  DateTime?
+  
+  // Confirmación de entrega
+  comprobanteURL    String?       // foto de entrega
+  firmadoPor        String?
+  observaciones     String?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([estadoEnvio])
+}
+
+enum EstadoEnvio {
+  PENDIENTE         // Esperando pago
+  PAGADO            // Pago confirmado, esperando preparación
+  EN_PREPARACION    // Vendedor preparando el pedido
+  EN_TRANSITO       // En camino al cliente
+  ENTREGADO         // Recibido por el cliente
+  CANCELADO         // Cancelado por alguna razón
+}
+
+model Factura {
+  id                String          @id @default(uuid())
+  
+  negociacionId     String          @unique
+  negociacion       Negociacion     @relation(fields: [negociacionId], references: [id])
+  
+  // Montos
+  subtotal          Decimal         @db.Decimal(10, 2)  // cantidad × precio
+  costoFlete        Decimal         @db.Decimal(10, 2)
+  comisionPlataforma Decimal        @db.Decimal(10, 2)  // % configurado
+  total             Decimal         @db.Decimal(10, 2)
+  
+  // Pago
+  estadoPago        EstadoPago      @default(PENDIENTE)
+  metodoPago        String?         // "Nequi", "Bancolombia", etc.
+  comprobanteURL    String?         // screenshot del pago
+  
+  // Liberación de fondos
+  fondosLiberados   Boolean         @default(false)
+  fechaLiberacion   DateTime?
+  
+  // PDF
+  archivoURL        String?         // URL del PDF generado
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([estadoPago])
+}
+
+enum EstadoPago {
+  PENDIENTE         // Cliente aún no paga
+  COMPROBANTE_SUBIDO // Cliente subió comprobante
+  VERIFICANDO       // Admin revisando pago
+  CONFIRMADO        // Pago verificado
+  RECHAZADO         // Comprobante falso o incorrecto
+}
+
+model Calificacion {
+  id                Int       @id @default(autoincrement())
+  
+  negociacionId     String
+  
+  // Quién califica
+  calificadorId     Int
+  calificador       User      @relation("CalificacionesHechas", fields: [calificadorId], references: [id])
+  
+  // A quién califica
+  calificadoId      Int
+  calificado        User      @relation("CalificacionesRecibidas", fields: [calificadoId], references: [id])
+  
+  // Calificación
+  estrellas         Int       // 1-5
+  comentario        String?
+  
+  createdAt         DateTime  @default(now())
+  
+  @@unique([negociacionId, calificadorId]) // Solo una calificación por negociación
+  @@index([calificadoId])
+}
+
+model Notificacion {
+  id          String   @id @default(cuid())
+  usuarioId   Int
+  tipo        String   // "NUEVA_PROPUESTA" | "PROPUESTA_ACEPTADA" | "PROPUESTA_RECHAZADA"
+  titulo      String
+  mensaje     String
+  leida       Boolean  @default(false)
+  negociacionId String?
+  createdAt   DateTime @default(now())
+
+  usuario     User         @relation("NotificacionesUsuario", fields: [usuarioId], references: [id])
+negociacion Negociacion? @relation("NotificacionesNegociacion", fields: [negociacionId], references: [id])
 }

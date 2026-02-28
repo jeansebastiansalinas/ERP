@@ -1,7 +1,6 @@
 import { api } from '@/lib/api';
 import { RoleName } from '@/types/auth';
-import { getCookie } from '@/lib/cookies';
-import { deleteCookie } from '@/lib/cookies';
+import { getCookie, deleteCookie } from '@/lib/cookies';
 
 // 📖 TIPOS: Definimos la estructura de datos
 
@@ -9,7 +8,7 @@ import { deleteCookie } from '@/lib/cookies';
 interface LoginResponse {
   accessToken: string;
   user: {
-    id: string;
+    id: number;        // ← CAMBIO: number en lugar de string
     email: string;
     name: string;
     role: RoleName;
@@ -26,7 +25,7 @@ interface RegisterData {
 
 // Datos del usuario actual
 export interface CurrentUser {
-  id: string;
+  id: number;          // ← CAMBIO: number en lugar de string
   email: string;
   name: string;
   role: RoleName;
@@ -37,16 +36,12 @@ export interface CurrentUser {
 // =========================
 export async function login(email: string, password: string): Promise<LoginResponse> {
   try {
-    // 📖 axios.post() hace una petición POST al backend
     const { data } = await api.post<LoginResponse>('/auth/login', {
       email,
       password,
     });
-
-    // 📖 Retornamos el accessToken y los datos del usuario
     return data;
   } catch (error: any) {
-    // 📖 Si hay error, lo lanzamos para que useAuth lo capture
     throw new Error(error.response?.data?.message || 'Error al iniciar sesión');
   }
 }
@@ -67,7 +62,6 @@ export async function register(userData: RegisterData): Promise<void> {
 // =========================
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   try {
-    // 📖 CAMBIO: Obtenemos el token de las cookies
     const token = getCookie('token');
 
     if (!token) {
@@ -88,9 +82,23 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 }
 
 // =========================
+// 👤 GET USER DATA (Alias para getCurrentUser)
+// =========================
+// 📖 Esta función es un alias de getCurrentUser()
+// La usamos en negociaciones para obtener el ID del usuario actual
+export async function getUserData(): Promise<CurrentUser> {
+  const user = await getCurrentUser();
+  
+  if (!user) {
+    throw new Error('Usuario no autenticado');
+  }
+  
+  return user;
+}
+
+// =========================
 // 🔓 LOGOUT
 // =========================
 export function logout(): void {
-  // 📖 CAMBIO: Eliminamos de cookies en lugar de localStorage
   deleteCookie('token');
 }
