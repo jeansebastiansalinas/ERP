@@ -13,6 +13,7 @@ import { SolicitudesModule } from './solicitudes/solicitudes.module';
 import { NegociacionesModule } from './negociaciones/negociaciones.module'; 
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { EnviosModule } from './envios/envios.module';
+import { ReportesModule } from './reportes/reportes.module';
 
 
 
@@ -28,6 +29,7 @@ import { EnviosModule } from './envios/envios.module';
     OfertasModule,
     NegociacionesModule,
     NotificacionesModule,
+    ReportesModule,
     EnviosModule,
     SolicitudesModule, // ← NUEVO
   ],

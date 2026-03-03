@@ -1,671 +1,680 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import Preloader from '@/components/onboarding/Preloader';
 import WelcomeModal from '@/components/onboarding/WelcomeModal';
 import {
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Activity,
-  Clock,
-  MapPin,
-  CheckCircle,
-  Zap,
-  Award,
-  ChevronRight,
-  Filter,
-  Download,
-  Navigation,
-  Fuel,
-  AlertTriangle,
-  CheckCheck,
-  Timer,
-  Package,
-  Truck,
+  TrendingUp, DollarSign, Activity, Package, Truck, Users,
+  Fuel, CheckCircle, Clock, AlertCircle, ArrowRight,
+  Loader2, RefreshCw, ShoppingCart, BarChart3, Zap,
 } from 'lucide-react';
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
+import { getAdminStats } from '@/services/admin.service';
+import { getMisNegociaciones, getAllNegociaciones } from '@/services/negociaciones.service';
+import { getReportes } from '@/services/reportes.service';
+import { useRouter } from 'next/navigation';
 
+// ── Colores consistentes con el resto del sistema ─────────────────────────────
+const COLORS_DONA = ['#22c55e','#3b82f6','#f97316','#ef4444','#8b5cf6'];
+const TOOLTIP_STYLE = {
+  backgroundColor: 'white',
+  border: '1px solid #e2e8f0',
+  borderRadius: '12px',
+  boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+  fontSize: '12px',
+};
+
+const ESTADO_LABELS: Record<string, string> = {
+  ESPERANDO_CONFIRMACION: 'Esperando',
+  CONFIRMADA: 'Confirmada',
+  RECHAZADA: 'Rechazada',
+  CANCELADA: 'Cancelada',
+  COMPLETADA: 'Completada',
+  PENDIENTE: 'Pendiente',
+  PAGADO: 'Pagado',
+  EN_PREPARACION: 'Preparando',
+  EN_TRANSITO: 'En tránsito',
+  ENTREGADO: 'Entregado',
+};
+
+// ── KPI Card ──────────────────────────────────────────────────────────────────
+function KpiCard({ title, value, sub, icon: Icon, color, prefix = '', suffix = '', onClick }: {
+  title: string; value: number | string; sub?: string; icon: any;
+  color: string; prefix?: string; suffix?: string; onClick?: () => void;
+}) {
+  return (
+    <Card
+      className={`border-0 shadow-lg hover:shadow-xl transition-all duration-200 hover:-translate-y-1 ${onClick ? 'cursor-pointer' : ''}`}
+      onClick={onClick}
+    >
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-500 mb-1 truncate">{title}</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {prefix}{typeof value === 'number' ? value.toLocaleString('en-US', { maximumFractionDigits: 0 }) : value}{suffix}
+            </p>
+            {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+          </div>
+          <div className={`p-2.5 rounded-xl ml-3 flex-shrink-0 ${color.split(' ')[0]}`}>
+            <Icon className={`w-5 h-5 ${color.split(' ')[1]}`} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Acceso rápido ─────────────────────────────────────────────────────────────
+function AccesoRapido({ label, icon: Icon, color, href }: {
+  label: string; icon: any; color: string; href: string;
+}) {
+  const router = useRouter();
+  return (
+    <button
+      onClick={() => router.push(href)}
+      className={`flex flex-col items-center justify-center gap-2 p-5 rounded-2xl border-2 border-dashed border-gray-200 hover:border-red-300 hover:bg-red-50 transition-all group`}
+    >
+      <div className={`p-3 rounded-xl ${color.split(' ')[0]} group-hover:scale-110 transition-transform`}>
+        <Icon className={`w-6 h-6 ${color.split(' ')[1]}`} />
+      </div>
+      <span className="text-xs font-semibold text-gray-700">{label}</span>
+    </button>
+  );
+}
+
+// ── Negociación reciente ───────────────────────────────────────────────────────
+function NegociacionReciente({ neg, userId }: { neg: any; userId: number }) {
+  const total = neg.cantidad * Number(neg.precioUnitario);
+  const esVendedor = Number(neg.vendedorId) === userId;
+  const contraparte = esVendedor ? neg.comprador?.name : neg.vendedor?.name;
+  const estadoConfig: Record<string, { color: string; bg: string }> = {
+    ESPERANDO_CONFIRMACION: { color: 'text-yellow-700', bg: 'bg-yellow-100' },
+    CONFIRMADA:   { color: 'text-blue-700',   bg: 'bg-blue-100'   },
+    COMPLETADA:   { color: 'text-green-700',  bg: 'bg-green-100'  },
+    RECHAZADA:    { color: 'text-red-700',    bg: 'bg-red-100'    },
+    CANCELADA:    { color: 'text-gray-600',   bg: 'bg-gray-100'   },
+  };
+  const cfg = estadoConfig[neg.estado] ?? { color: 'text-gray-600', bg: 'bg-gray-100' };
+
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
+          <Fuel className="w-4 h-4 text-red-500" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-800">{neg.cantidad.toLocaleString()} gal · {neg.tipoProducto}</p>
+          <p className="text-xs text-gray-400">{contraparte} · {neg.ciudad}</p>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0 ml-3">
+        <p className="text-sm font-bold text-gray-900">${total.toLocaleString('en-US', { maximumFractionDigits: 0 })}</p>
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${cfg.bg} ${cfg.color}`}>
+          {ESTADO_LABELS[neg.estado] ?? neg.estado}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VISTAS POR ROL
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Dashboard ADMIN ───────────────────────────────────────────────────────────
+function DashboardAdmin({ stats, reportes }: { stats: any; reportes: any }) {
+  const router = useRouter();
+
+  const kpis = reportes?.kpis ?? {};
+  const actividadPorMes = reportes?.actividadPorMes ?? [];
+  const negPorEstado = (reportes?.negPorEstado ?? []).map((d: any) => ({
+    ...d, name: ESTADO_LABELS[d.name] ?? d.name,
+  }));
+  const topVendedores = reportes?.topVendedores ?? [];
+
+  return (
+    <div className="space-y-6">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard title="Total Negociaciones" value={kpis.totalNegociaciones ?? stats?.negociaciones?.total ?? 0}      icon={Activity}    color="bg-purple-50 text-purple-600" />
+        <KpiCard title="Total Facturado"     value={kpis.totalFacturado ?? 0}      prefix="$" icon={DollarSign}  color="bg-green-50 text-green-600"  />
+        <KpiCard title="Comisiones Ganadas"  value={kpis.totalComisiones ?? 0}     prefix="$" icon={TrendingUp}  color="bg-red-50 text-red-600"      />
+        <KpiCard title="Tasa de Éxito"       value={kpis.tasaExito ?? 0}           suffix="%" icon={CheckCircle} color="bg-blue-50 text-blue-600"    />
+        <KpiCard title="Usuarios Vendedores" value={kpis.totalVendedores ?? stats?.usuarios?.vendedores ?? 0}  icon={Users}      color="bg-blue-50 text-blue-600"    onClick={() => router.push('/dashboard/configuracion')} />
+        <KpiCard title="Usuarios Compradores"value={kpis.totalCompradores ?? stats?.usuarios?.compradores ?? 0} icon={ShoppingCart} color="bg-orange-50 text-orange-600" onClick={() => router.push('/dashboard/configuracion')} />
+        <KpiCard title="Ofertas Publicadas"  value={kpis.totalOfertas ?? stats?.ofertas?.total ?? 0}            icon={Package}    color="bg-yellow-50 text-yellow-600" onClick={() => router.push('/dashboard/vendedores')} />
+        <KpiCard title="Solicitudes Activas" value={kpis.totalSolicitudes ?? stats?.solicitudes?.total ?? 0}    icon={Truck}      color="bg-green-50 text-green-600"  onClick={() => router.push('/dashboard/clientes')} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Actividad mensual */}
+        <Card className="border-0 shadow-lg lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <Activity className="w-4 h-4 text-red-500" />Actividad mensual del sistema
+            </CardTitle>
+            <CardDescription className="text-xs">Negociaciones creadas, confirmadas y completadas</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {actividadPorMes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 text-gray-400">
+                <BarChart3 className="w-10 h-10 mb-2 opacity-20" />
+                <p className="text-sm">Sin datos aún — crea negociaciones para ver estadísticas</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={actividadPorMes}>
+                  <defs>
+                    <linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="mes" stroke="#94a3b8" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
+                  <Area type="monotone" dataKey="total"       stroke="#ef4444" fill="url(#gTotal)" strokeWidth={2} name="Total" />
+                  <Area type="monotone" dataKey="confirmadas" stroke="#3b82f6" fill="transparent" strokeWidth={2} name="Confirmadas" />
+                  <Area type="monotone" dataKey="completadas" stroke="#22c55e" fill="transparent" strokeWidth={2} name="Completadas" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Dona: estados */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold">Estado de negociaciones</CardTitle>
+            <CardDescription className="text-xs">Distribución actual</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {negPorEstado.length === 0 ? (
+              <div className="flex items-center justify-center h-52 text-gray-400 text-sm">Sin datos aún</div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie data={negPorEstado} cx="50%" cy="50%" innerRadius={45} outerRadius={70}
+                      paddingAngle={3} dataKey="value">
+                      {negPorEstado.map((_: any, i: number) => (
+                        <Cell key={i} fill={COLORS_DONA[i % COLORS_DONA.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="space-y-1.5 mt-2">
+                  {negPorEstado.map((d: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS_DONA[i % COLORS_DONA.length] }} />
+                        <span className="text-gray-600">{d.name}</span>
+                      </div>
+                      <span className="font-bold text-gray-800">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top vendedores */}
+      {topVendedores.length > 0 && (
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-red-500" />Top vendedores del sistema
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={topVendedores} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis type="number" stroke="#94a3b8" tick={{ fontSize: 10 }} tickFormatter={(v: number) => `$${(v/1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="nombre" stroke="#94a3b8" tick={{ fontSize: 10 }} width={100} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: any) => [`$${Number(v).toLocaleString()}`, 'Monto']} />
+                <Bar dataKey="monto" fill="#ef4444" radius={[0,6,6,0]} name="Monto vendido" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Accesos rápidos admin */}
+      <Card className="border-0 shadow-lg bg-gradient-to-br from-slate-900 to-slate-800">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-white flex items-center gap-2">
+            <Zap className="w-5 h-5 text-yellow-400" />Accesos rápidos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Ver Envíos',      icon: Truck,        href: '/dashboard/envios',         color: 'bg-blue-900/50 text-blue-300'   },
+              { label: 'Vendedores',      icon: Package,      href: '/dashboard/vendedores',     color: 'bg-yellow-900/50 text-yellow-300'},
+              { label: 'Clientes',        icon: ShoppingCart, href: '/dashboard/clientes',       color: 'bg-green-900/50 text-green-300'  },
+              { label: 'Configuración',   icon: Users,        href: '/dashboard/configuracion',  color: 'bg-purple-900/50 text-purple-300'},
+            ].map(a => (
+              <button key={a.label} onClick={() => router.push(a.href)}
+                className="flex flex-col items-center gap-2 py-4 px-3 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 transition-all group">
+                <div className={`p-2.5 rounded-xl ${a.color} group-hover:scale-110 transition-transform`}>
+                  <a.icon className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-semibold text-white/80">{a.label}</span>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Dashboard VENDEDOR ────────────────────────────────────────────────────────
+function DashboardVendedor({ negociaciones, reportes, userId }: { negociaciones: any[]; reportes: any; userId: number }) {
+  const router = useRouter();
+  const kpis = reportes?.kpis ?? {};
+  const misIngresosPorMes = reportes?.misIngresosPorMes ?? [];
+  const recientes = negociaciones.slice(0, 5);
+
+  const propuestasPendientes = negociaciones.filter(n => n.estado === 'ESPERANDO_CONFIRMACION');
+
+  return (
+    <div className="space-y-6">
+      {/* Alerta propuestas pendientes */}
+      {propuestasPendientes.length > 0 && (
+        <div className="flex items-center justify-between p-4 bg-yellow-50 border border-yellow-200 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <Clock className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-yellow-800">
+                {propuestasPendientes.length} propuesta{propuestasPendientes.length > 1 ? 's' : ''} esperando tu respuesta
+              </p>
+              <p className="text-xs text-yellow-600">No olvides revisar y aceptar o rechazar</p>
+            </div>
+          </div>
+          <button onClick={() => router.push('/dashboard/envios')}
+            className="flex items-center gap-1.5 px-4 py-2 bg-yellow-500 text-white text-sm font-semibold rounded-xl hover:bg-yellow-600 transition-colors flex-shrink-0">
+            Revisar <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard title="Mis ventas totales"   value={kpis.totalFacturado ?? 0}        prefix="$" icon={DollarSign}  color="bg-green-50 text-green-600"   />
+        <KpiCard title="Ingresos netos"        value={kpis.totalIngresosNetos ?? 0}   prefix="$" icon={TrendingUp}  color="bg-red-50 text-red-600"       />
+        <KpiCard title="Galones vendidos"      value={kpis.totalGalonesVendidos ?? 0} suffix=" gal" icon={Fuel}    color="bg-yellow-50 text-yellow-600"  />
+        <KpiCard title="Tasa de aceptación"    value={kpis.tasaAceptacion ?? 0}       suffix="%" icon={CheckCircle} color="bg-blue-50 text-blue-600"     />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Ingresos por mes */}
+        <Card className="border-0 shadow-lg lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-green-500" />Mis ingresos mensuales
+            </CardTitle>
+            <CardDescription className="text-xs">Total facturado vs ingreso neto</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {misIngresosPorMes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 text-gray-400">
+                <BarChart3 className="w-10 h-10 mb-2 opacity-20" />
+                <p className="text-sm">Acepta negociaciones para ver tus ingresos</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={misIngresosPorMes}>
+                  <defs>
+                    <linearGradient id="gNeto" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="mes" stroke="#94a3b8" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${(v/1000).toFixed(0)}k`} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: any) => [`$${Number(v).toLocaleString()}`, '']} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
+                  <Area type="monotone" dataKey="neto"  stroke="#22c55e" fill="url(#gNeto)" strokeWidth={2} name="Neto" />
+                  <Area type="monotone" dataKey="total" stroke="#ef4444" fill="transparent" strokeWidth={2} name="Total facturado" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Stats compactas */}
+        <div className="space-y-3">
+          {[
+            { label: 'Negociaciones totales', value: kpis.totalNegociaciones ?? 0, color: 'bg-purple-50', text: 'text-purple-600' },
+            { label: 'Completadas',           value: kpis.completadas ?? 0,        color: 'bg-green-50',  text: 'text-green-600'  },
+            { label: 'Pendientes respuesta',  value: kpis.pendientes ?? 0,         color: 'bg-yellow-50', text: 'text-yellow-600' },
+            { label: 'Rechazadas',            value: kpis.rechazadas ?? 0,         color: 'bg-red-50',    text: 'text-red-600'    },
+          ].map(({ label, value, color, text }) => (
+            <div key={label} className={`p-4 rounded-xl ${color} flex justify-between items-center`}>
+              <span className="text-sm text-gray-600">{label}</span>
+              <span className={`text-xl font-bold ${text}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Negociaciones recientes */}
+      <Card className="border-0 shadow-lg">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-bold">Mis negociaciones recientes</CardTitle>
+            <button onClick={() => router.push('/dashboard/envios')}
+              className="text-xs text-red-500 font-semibold flex items-center gap-1 hover:underline">
+              Ver todas <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recientes.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-20" />
+              <p className="text-sm">Sin negociaciones aún — explora las solicitudes de compradores</p>
+              <button onClick={() => router.push('/dashboard/clientes')}
+                className="mt-3 text-sm text-red-500 font-semibold hover:underline">
+                Ver clientes →
+              </button>
+            </div>
+          ) : (
+            <div>{recientes.map((n: any) => <NegociacionReciente key={n.id} neg={n} userId={userId} />)}</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Accesos rápidos vendedor */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <AccesoRapido label="Ver Solicitudes"   icon={ShoppingCart} color="bg-blue-50 text-blue-600"   href="/dashboard/clientes"  />
+        <AccesoRapido label="Mis Propuestas"    icon={Activity}     color="bg-yellow-50 text-yellow-600" href="/dashboard/envios"   />
+        <AccesoRapido label="Mis Ofertas"       icon={Package}      color="bg-green-50 text-green-600"  href="/dashboard/vendedores"/>
+        <AccesoRapido label="Reportes"          icon={BarChart3}    color="bg-purple-50 text-purple-600" href="/dashboard/reportes" />
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard COMPRADOR ───────────────────────────────────────────────────────
+function DashboardComprador({ negociaciones, reportes, userId }: { negociaciones: any[]; reportes: any; userId: number }) {
+  const router = useRouter();
+  const kpis = reportes?.kpis ?? {};
+  const miGastoPorMes = reportes?.miGastoPorMes ?? [];
+  const recientes = negociaciones.slice(0, 5);
+
+  const enviosActivos = negociaciones.filter(n => n.estado === 'CONFIRMADA' && n.envio);
+  const pagosPendientes = negociaciones.filter(n =>
+    n.factura?.estadoPago === 'PENDIENTE' && n.estado === 'CONFIRMADA'
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Alerta pagos pendientes */}
+      {pagosPendientes.length > 0 && (
+        <div className="flex items-center justify-between p-4 bg-red-50 border border-red-200 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-red-800">
+                {pagosPendientes.length} pago{pagosPendientes.length > 1 ? 's' : ''} pendiente{pagosPendientes.length > 1 ? 's' : ''}
+              </p>
+              <p className="text-xs text-red-600">Sube el comprobante para continuar el proceso</p>
+            </div>
+          </div>
+          <button onClick={() => router.push('/dashboard/envios')}
+            className="flex items-center gap-1.5 px-4 py-2 bg-red-500 text-white text-sm font-semibold rounded-xl hover:bg-red-600 transition-colors flex-shrink-0">
+            Pagar <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard title="Total gastado"         value={kpis.totalGastado ?? 0}              prefix="$"    icon={DollarSign}   color="bg-red-50 text-red-600"        />
+        <KpiCard title="Galones comprados"     value={kpis.totalGalonesComprados ?? 0}     suffix=" gal" icon={Fuel}         color="bg-yellow-50 text-yellow-600"  />
+        <KpiCard title="Compras completadas"   value={kpis.completadas ?? 0}               icon={CheckCircle} color="bg-green-50 text-green-600"  />
+        <KpiCard title="Tasa de completado"    value={kpis.tasaCompletado ?? 0}            suffix="%"    icon={Activity}     color="bg-blue-50 text-blue-600"      />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Gasto por mes */}
+        <Card className="border-0 shadow-lg lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-red-500" />Mi gasto mensual en combustible
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {miGastoPorMes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 text-gray-400">
+                <BarChart3 className="w-10 h-10 mb-2 opacity-20" />
+                <p className="text-sm">Completa compras para ver tu historial de gasto</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <AreaChart data={miGastoPorMes}>
+                  <defs>
+                    <linearGradient id="gGasto" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="mes" stroke="#94a3b8" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${(v/1000).toFixed(0)}k`} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: any) => [`$${Number(v).toLocaleString()}`, 'Gasto']} />
+                  <Area type="monotone" dataKey="total" stroke="#ef4444" fill="url(#gGasto)" strokeWidth={2.5} dot={{ r: 3, fill: '#ef4444' }} name="Gasto total" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Resumen rápido comprador */}
+        <div className="space-y-3">
+          {[
+            { label: 'Total compras',          value: kpis.totalCompras ?? 0,     color: 'bg-purple-50', text: 'text-purple-600' },
+            { label: 'En curso',               value: kpis.enCurso ?? 0,          color: 'bg-blue-50',   text: 'text-blue-600'   },
+            { label: 'Promedio por compra',     value: `${kpis.promedioGalonesPorCompra ?? 0} gal`, color: 'bg-yellow-50', text: 'text-yellow-700' },
+            { label: 'Canceladas/Rechazadas',   value: kpis.canceladas ?? 0,       color: 'bg-gray-50',   text: 'text-gray-600'   },
+          ].map(({ label, value, color, text }) => (
+            <div key={label} className={`p-4 rounded-xl ${color} flex justify-between items-center`}>
+              <span className="text-sm text-gray-600">{label}</span>
+              <span className={`text-lg font-bold ${text}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Envíos activos */}
+      {enviosActivos.length > 0 && (
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-bold flex items-center gap-2">
+                <Truck className="w-4 h-4 text-blue-500" />Mis envíos en curso
+              </CardTitle>
+              <button onClick={() => router.push('/dashboard/envios')}
+                className="text-xs text-red-500 font-semibold flex items-center gap-1 hover:underline">
+                Ver todos <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {enviosActivos.slice(0, 3).map((n: any) => {
+                const prog = n.envio?.progresoEstimado ?? 0;
+                return (
+                  <div key={n.id} className="p-3 bg-blue-50 rounded-xl">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-semibold text-gray-800">{n.cantidad.toLocaleString()} gal · {n.tipoProducto}</span>
+                      <span className="text-xs font-bold text-blue-600">{prog}%</span>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-1.5">
+                      <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${prog}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{n.envio?.estadoEnvio?.replace('_', ' ')} · {n.ciudad}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Negociaciones recientes */}
+      <Card className="border-0 shadow-lg">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-bold">Mis compras recientes</CardTitle>
+            <button onClick={() => router.push('/dashboard/envios')}
+              className="text-xs text-red-500 font-semibold flex items-center gap-1 hover:underline">
+              Ver todas <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recientes.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-20" />
+              <p className="text-sm">Sin compras aún — explora las ofertas disponibles</p>
+              <button onClick={() => router.push('/dashboard/vendedores')}
+                className="mt-3 text-sm text-red-500 font-semibold hover:underline">
+                Ver ofertas →
+              </button>
+            </div>
+          ) : (
+            <div>{recientes.map((n: any) => <NegociacionReciente key={n.id} neg={n} userId={userId} />)}</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Accesos rápidos comprador */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <AccesoRapido label="Ver Ofertas"      icon={Package}      color="bg-red-50 text-red-600"      href="/dashboard/vendedores" />
+        <AccesoRapido label="Mis Compras"      icon={Activity}     color="bg-blue-50 text-blue-600"    href="/dashboard/envios"     />
+        <AccesoRapido label="Mis Solicitudes"  icon={ShoppingCart} color="bg-yellow-50 text-yellow-600" href="/dashboard/clientes"  />
+        <AccesoRapido label="Reportes"         icon={BarChart3}    color="bg-purple-50 text-purple-600" href="/dashboard/reportes"  />
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PÁGINA PRINCIPAL
+// ══════════════════════════════════════════════════════════════════════════════
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, initializing } = useAuth();
   const { isLoading, showWelcome, handlePreloaderComplete, completeWelcome } = useOnboarding(user?.email);
+
+  const [stats, setStats]           = useState<any>(null);
+  const [reportes, setReportes]     = useState<any>(null);
+  const [negociaciones, setNegociaciones] = useState<any[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
   const [dashboardVisible, setDashboardVisible] = useState(false);
 
-  // 📖 Activar dashboard cuando NO esté cargando
+  const rol = (user as any)?.role ?? '';
+  const userId = user ? Number((user as any).userId ?? (user as any).id ?? 0) : 0;
+  const esAdmin = rol === 'ADMIN' || rol === 'SUPER_ADMIN';
+
+  const cargarDatos = useCallback(async () => {
+    if (!user) return;
+    try {
+      setLoadingData(true);
+      const promesas: Promise<any>[] = [getReportes()];
+      if (esAdmin) promesas.push(getAdminStats());
+      else promesas.push(getMisNegociaciones());
+
+      const [rep, extra] = await Promise.all(promesas);
+      setReportes(rep);
+      if (esAdmin) setStats(extra);
+      else setNegociaciones(extra ?? []);
+    } catch (e) {
+      console.error('Error cargando dashboard:', e);
+    } finally {
+      setLoadingData(false);
+    }
+  }, [user, esAdmin]);
+
   useEffect(() => {
-    if (!isLoading) {
+    if (!initializing && user) {
+      cargarDatos();
       setDashboardVisible(true);
     }
-  }, [isLoading]);
+  }, [initializing, user, cargarDatos]);
 
-  // 📊 Datos para los gráficos de Recharts
-  const monthlyData = [
-    { name: 'Ene', envios: 186, ingresos: 28000, entregas: 174 },
-    { name: 'Feb', envios: 305, ingresos: 42000, entregas: 298 },
-    { name: 'Mar', envios: 237, ingresos: 35000, entregas: 229 },
-    { name: 'Abr', envios: 273, ingresos: 39000, entregas: 267 },
-    { name: 'May', envios: 209, ingresos: 31000, entregas: 205 },
-    { name: 'Jun', envios: 314, ingresos: 45000, entregas: 308 },
-    { name: 'Jul', envios: 285, ingresos: 41000, entregas: 279 },
-  ];
+  if (isLoading) return <Preloader onComplete={handlePreloaderComplete} />;
 
-  const fleetPerformance = [
-    { vehicle: 'VH-001', efficiency: 92, trips: 45, status: 'Excelente' },
-    { vehicle: 'VH-002', efficiency: 88, trips: 38, status: 'Bueno' },
-    { vehicle: 'VH-003', efficiency: 95, trips: 52, status: 'Excelente' },
-    { vehicle: 'VH-004', efficiency: 78, trips: 28, status: 'Regular' },
-    { vehicle: 'VH-005', efficiency: 90, trips: 41, status: 'Bueno' },
-  ];
-
-  const deliveryStatus = [
-    { name: 'Entregado', value: 784, color: '#10b981' },
-    { name: 'En tránsito', value: 156, color: '#3b82f6' },
-    { name: 'Pendiente', value: 89, color: '#f59e0b' },
-    { name: 'Retrasado', value: 24, color: '#ef4444' },
-  ];
-
-  const revenueData = [
-    { month: 'Ene', revenue: 28000 },
-    { month: 'Feb', revenue: 42000 },
-    { month: 'Mar', revenue: 35000 },
-    { month: 'Abr', revenue: 39000 },
-    { month: 'May', revenue: 31000 },
-    { month: 'Jun', revenue: 45000 },
-    { month: 'Jul', revenue: 41000 },
-  ];
-
-  // 📈 Métricas principales
-  const metrics = [
-    {
-      title: 'Envíos Totales',
-      value: '2,543',
-      change: '+12.5%',
-      trend: 'up',
-      icon: Package,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-500',
-      lightBg: 'bg-blue-50',
-      description: 'vs. mes anterior',
-    },
-    {
-      title: 'Ingresos del Mes',
-      value: '$45,231',
-      change: '+8.2%',
-      trend: 'up',
-      icon: DollarSign,
-      color: 'text-green-600',
-      bgColor: 'bg-green-500',
-      lightBg: 'bg-green-50',
-      description: 'vs. mes anterior',
-    },
-    {
-      title: 'Flota Activa',
-      value: '127/135',
-      change: '94%',
-      trend: 'up',
-      icon: Truck,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-500',
-      lightBg: 'bg-purple-50',
-      description: 'disponibilidad',
-    },
-    {
-      title: 'Tasa de Entrega',
-      value: '98.5%',
-      change: '+1.2%',
-      trend: 'up',
-      icon: Activity,
-      color: 'text-red-600',
-      bgColor: 'bg-red-500',
-      lightBg: 'bg-red-50',
-      description: 'eficiencia',
-    },
-  ];
-
-  // 🚚 Envíos en tiempo real
-  const liveShipments = [
-    {
-      id: 'SHP-2024-001',
-      client: 'Almacenes García',
-      origin: 'Popayán',
-      destination: 'Bogotá',
-      driver: 'Carlos Méndez',
-      vehicle: 'VH-023',
-      progress: 65,
-      status: 'En tránsito',
-      statusColor: 'bg-blue-500',
-      eta: '2 horas',
-      distance: '342 km',
-    },
-    {
-      id: 'SHP-2024-002',
-      client: 'Distribuidora López',
-      origin: 'Cali',
-      destination: 'Medellín',
-      driver: 'Ana Torres',
-      vehicle: 'VH-015',
-      progress: 100,
-      status: 'Entregado',
-      statusColor: 'bg-green-500',
-      eta: 'Completado',
-      distance: '415 km',
-    },
-    {
-      id: 'SHP-2024-003',
-      client: 'Comercial Ramírez',
-      origin: 'Pasto',
-      destination: 'Cali',
-      driver: 'Luis Gómez',
-      vehicle: 'VH-041',
-      progress: 35,
-      status: 'En tránsito',
-      statusColor: 'bg-blue-500',
-      eta: '4 horas',
-      distance: '287 km',
-    },
-  ];
-
-
-
-  
-
-  // 🏆 Top performers
-  const topDrivers = [
-    { name: 'Carlos Méndez', trips: 52, rating: 4.9, avatar: 'CM' },
-    { name: 'Ana Torres', trips: 48, rating: 4.8, avatar: 'AT' },
-    { name: 'Luis Gómez', trips: 45, rating: 4.7, avatar: 'LG' },
-  ];
-
-  if (isLoading) {
-    return <Preloader onComplete={handlePreloaderComplete} />;
-  }
+  const nombre = user?.name?.split(' ')[0] || 'Usuario';
 
   return (
     <>
       {showWelcome && (
-        <WelcomeModal 
-          userName={user?.name?.split(' ')[0] || 'Usuario'} 
-          onClose={completeWelcome}
-        />
+        <WelcomeModal userName={nombre} onClose={completeWelcome} />
       )}
 
-      <div className={`space-y-8 transition-all duration-700 ${dashboardVisible ? 'opacity-100' : 'opacity-0'}`}>
-        {/* Welcome Section */}
+      <div className={`space-y-6 transition-all duration-500 ${dashboardVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+        {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">
-              ¡Bienvenido de vuelta, {user?.name?.split(' ')[0] || 'Usuario'}! 👋
+            <h2 className="text-3xl font-bold text-gray-900 mb-1">
+              ¡Bienvenido, {nombre}! 👋
             </h2>
-            <p className="text-gray-600">
-              Aquí está el resumen de tu operación logística en tiempo real
+            <p className="text-gray-500 text-sm">
+              {esAdmin
+                ? 'Vista completa del sistema ERP'
+                : rol === 'VENDEDOR'
+                ? 'Tu panel de ventas y negociaciones'
+                : 'Tu panel de compras y envíos'}
             </p>
           </div>
-          <div className="flex gap-3">
-            <Button variant="outline" className="gap-2 border-2 hover:bg-gray-50">
-              <Filter className="w-4 h-4" />
-              Filtros
-            </Button>
-            <Button className="gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 shadow-lg shadow-red-500/30">
-              <Download className="w-4 h-4" />
-              Exportar Reporte
-            </Button>
+          <button onClick={cargarDatos} disabled={loadingData}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50 self-start lg:self-auto">
+            <RefreshCw className={`w-4 h-4 ${loadingData ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+        </div>
+
+        {/* Loading */}
+        {(loadingData || initializing) && (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+            <span className="ml-3 text-gray-500">Cargando tus datos...</span>
           </div>
-        </div>
+        )}
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {metrics.map((metric, index) => (
-            <Card
-              key={index}
-              className="relative border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 overflow-hidden group"
-            >
-              <div className={`absolute inset-0 ${metric.bgColor} opacity-0 group-hover:opacity-5 transition-opacity`} />
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">
-                  {metric.title}
-                </CardTitle>
-                <div className={`p-2 rounded-lg ${metric.lightBg}`}>
-                  <metric.icon className={`w-5 h-5 ${metric.color}`} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <p className="text-3xl font-bold text-gray-900">
-                    {metric.value}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <div
-                      className={`flex items-center gap-1.5 text-sm font-semibold ${
-                        metric.trend === 'up' ? 'text-green-600' : 'text-red-600'
-                      }`}
-                    >
-                      {metric.trend === 'up' ? (
-                        <TrendingUp className="w-4 h-4" />
-                      ) : (
-                        <TrendingDown className="w-4 h-4" />
-                      )}
-                      <span>{metric.change}</span>
-                    </div>
-                    <p className="text-xs text-gray-500">{metric.description}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* Charts Section */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="bg-white border shadow-sm p-1">
-            <TabsTrigger value="overview" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
-              Vista General
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
-              Análisis Detallado
-            </TabsTrigger>
-            <TabsTrigger value="fleet" className="data-[state=active]:bg-red-500 data-[state=active]:text-white">
-              Rendimiento Flota
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Line Chart - Envíos y Entregas */}
-              <Card className="border-0 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span className="text-xl">Envíos Mensuales</span>
-                    <Badge className="bg-blue-100 text-blue-700">Últimos 7 meses</Badge>
-                  </CardTitle>
-                  <CardDescription>Comparativa de envíos vs entregas exitosas</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={monthlyData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="name" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'white',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                        }}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="envios"
-                        stroke="#3b82f6"
-                        strokeWidth={3}
-                        dot={{ fill: '#3b82f6', r: 5 }}
-                        activeDot={{ r: 7 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="entregas"
-                        stroke="#10b981"
-                        strokeWidth={3}
-                        dot={{ fill: '#10b981', r: 5 }}
-                        activeDot={{ r: 7 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              {/* Area Chart - Ingresos */}
-              <Card className="border-0 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span className="text-xl">Ingresos</span>
-                    <Badge className="bg-green-100 text-green-700">+8.2% vs mes anterior</Badge>
-                  </CardTitle>
-                  <CardDescription>Evolución de ingresos mensuales</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <AreaChart data={revenueData}>
-                      <defs>
-                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="month" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'white',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                        }}
-                        formatter={(value) => `$${value.toLocaleString()}`}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="revenue"
-                        stroke="#10b981"
-                        strokeWidth={3}
-                        fillOpacity={1}
-                        fill="url(#colorRevenue)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Pie Chart - Estado de Entregas */}
-              <Card className="border-0 shadow-xl lg:col-span-1">
-                <CardHeader>
-                  <CardTitle className="text-xl">Estado de Entregas</CardTitle>
-                  <CardDescription>Distribución actual</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={deliveryStatus}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={90}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {deliveryStatus.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'white',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="space-y-2 mt-4">
-                    {deliveryStatus.map((status, index) => (
-                      <div key={index} className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: status.color }}
-                          />
-                          <span className="text-slate-600">{status.name}</span>
-                        </div>
-                        <span className="font-semibold text-slate-900">{status.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Live Shipments Tracking */}
-              <Card className="border-0 shadow-xl lg:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-xl">
-                    <Navigation className="w-5 h-5 text-red-500" />
-                    Seguimiento en Tiempo Real
-                  </CardTitle>
-                  <CardDescription>Envíos activos con ubicación GPS</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {liveShipments.map((shipment, index) => (
-                      <div
-                        key={index}
-                        className="p-4 bg-gradient-to-r from-slate-50 to-white rounded-xl border border-slate-200 hover:border-red-300 transition-all hover:shadow-lg"
-                      >
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <p className="font-bold text-slate-900">{shipment.id}</p>
-                            <p className="text-sm text-slate-600">{shipment.client}</p>
-                          </div>
-                          <Badge className={`${shipment.statusColor} text-white`}>
-                            {shipment.status}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-600 mb-3">
-                          <MapPin className="w-3 h-3" />
-                          <span>{shipment.origin}</span>
-                          <ChevronRight className="w-3 h-3" />
-                          <span>{shipment.destination}</span>
-                          <span className="ml-auto">·</span>
-                          <span>{shipment.distance}</span>
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-600">Progreso del viaje</span>
-                            <span className="font-semibold text-slate-900">
-                              {shipment.progress}%
-                            </span>
-                          </div>
-                          <Progress value={shipment.progress} className="h-2" />
-                        </div>
-                        <div className="flex items-center justify-between mt-3 text-xs">
-                          <span className="text-slate-600">
-                            Conductor: <span className="font-medium text-slate-900">{shipment.driver}</span>
-                          </span>
-                          <span className="text-slate-600">
-                            ETA: <span className="font-medium text-slate-900">{shipment.eta}</span>
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Bar Chart - Rendimiento de Flota */}
-              <Card className="border-0 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="text-xl">Eficiencia de Vehículos</CardTitle>
-                  <CardDescription>Top 5 vehículos por rendimiento</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={fleetPerformance}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="vehicle" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'white',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        dataKey="efficiency"
-                        fill="#8b5cf6"
-                        radius={[8, 8, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="trips"
-                        fill="#3b82f6"
-                        radius={[8, 8, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              {/* Top Drivers */}
-              <Card className="border-0 shadow-xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-xl">
-                    <Award className="w-5 h-5 text-yellow-500" />
-                    Conductores Destacados
-                  </CardTitle>
-                  <CardDescription>Mejor desempeño del mes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {topDrivers.map((driver, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-4 p-4 bg-gradient-to-r from-yellow-50 to-white rounded-xl border border-yellow-200"
-                      >
-                        <div className="relative">
-                          <Avatar className="w-14 h-14 border-2 border-yellow-400">
-                            <AvatarFallback className="bg-gradient-to-br from-yellow-400 to-yellow-500 text-white font-bold">
-                              {driver.avatar}
-                            </AvatarFallback>
-                          </Avatar>
-                          {index === 0 && (
-                            <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center">
-                              <Award className="w-4 h-4 text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-bold text-slate-900">{driver.name}</p>
-                          <p className="text-sm text-slate-600">{driver.trips} viajes completados</p>
-                        </div>
-                        <div className="text-right">
-                          <div className="flex items-center gap-1">
-                            {[...Array(5)].map((_, i) => (
-                              <svg
-                                key={i}
-                                className={`w-4 h-4 ${
-                                  i < Math.floor(driver.rating)
-                                    ? 'text-yellow-400 fill-current'
-                                    : 'text-slate-300'
-                                }`}
-                                viewBox="0 0 20 20"
-                              >
-                                <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
-                              </svg>
-                            ))}
-                          </div>
-                          <p className="text-sm font-semibold text-slate-900 mt-1">
-                            {driver.rating}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="fleet" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card className="border-0 shadow-xl bg-gradient-to-br from-green-50 to-white">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CheckCheck className="w-5 h-5 text-green-600" />
-                    Operativos
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-5xl font-bold text-green-600">127</p>
-                  <p className="text-slate-600 mt-2">Vehículos activos</p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-xl bg-gradient-to-br from-yellow-50 to-white">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Timer className="w-5 h-5 text-yellow-600" />
-                    En Mantenimiento
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-5xl font-bold text-yellow-600">5</p>
-                  <p className="text-slate-600 mt-2">Programado</p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-xl bg-gradient-to-br from-red-50 to-white">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
-                    Fuera de Servicio
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-5xl font-bold text-red-600">3</p>
-                  <p className="text-slate-600 mt-2">Requiere atención</p>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        {/* Quick Actions */}
-        <Card className="border-0 shadow-xl bg-gradient-to-br from-slate-900 to-slate-800 text-white">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-2xl">
-              <Zap className="w-6 h-6 text-yellow-400" />
-              Acciones Rápidas
-            </CardTitle>
-            <CardDescription className="text-slate-300">
-              Accede a las funciones más utilizadas
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Button className="h-24 flex-col gap-2 bg-white/10 hover:bg-white/20 border border-white/20">
-                <Package className="w-8 h-8" />
-                <span>Nuevo Envío</span>
-              </Button>
-              <Button className="h-24 flex-col gap-2 bg-white/10 hover:bg-white/20 border border-white/20">
-                <Truck className="w-8 h-8" />
-                <span>Asignar Vehículo</span>
-              </Button>
-              <Button className="h-24 flex-col gap-2 bg-white/10 hover:bg-white/20 border border-white/20">
-                <Package className="w-8 h-8" />
-                <span>Ver Envíos</span>
-              </Button>
-              <Button className="h-24 flex-col gap-2 bg-white/10 hover:bg-white/20 border border-white/20">
-                <Activity className="w-8 h-8" />
-                <span>Generar Reporte</span>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Contenido por rol */}
+        {!loadingData && !initializing && (
+          <>
+            {esAdmin && (
+              <DashboardAdmin stats={stats} reportes={reportes} />
+            )}
+            {rol === 'VENDEDOR' && (
+              <DashboardVendedor negociaciones={negociaciones} reportes={reportes} userId={userId} />
+            )}
+            {rol === 'COMPRADOR' && (
+              <DashboardComprador negociaciones={negociaciones} reportes={reportes} userId={userId} />
+            )}
+          </>
+        )}
       </div>
     </>
   );

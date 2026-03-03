@@ -6,6 +6,7 @@ import {
   Search, TrendingUp, X, Loader2, DollarSign, FileText,
   Fuel, ChevronDown, Upload, CreditCard, Copy, Check,
   AlertTriangle, RefreshCw, Shield, ArrowRight,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -607,6 +608,7 @@ function ModalAdmin({
     </div>
   );
 }
+
 // ── Tarjeta propuesta ESPERANDO_CONFIRMACION ──────────────────────────────────
 function TarjetaPropuesta({ negociacion, userId, isAdmin, onResponder, onCancelar }: {
   negociacion: Negociacion; userId: number; isAdmin: boolean;
@@ -615,19 +617,12 @@ function TarjetaPropuesta({ negociacion, userId, isAdmin, onResponder, onCancela
 }) {
   const total = negociacion.cantidad * Number(negociacion.precioUnitario);
 
-  // ── Lógica bidireccional ────────────────────────────────────────────────────
-  // ofertaId   → comprador contactó al vendedor   → vendedor debe responder
-  // solicitudId → vendedor contactó al comprador  → comprador debe responder
-  // Usamos ofertaId || oferta como doble check por si el campo viene de distinta forma del backend
   const origenOferta  = !!(negociacion.ofertaId || negociacion.oferta);
   const quienResponde = origenOferta ? negociacion.vendedor : negociacion.comprador;
   const quienEspera   = origenOferta ? negociacion.comprador : negociacion.vendedor;
-  // Usar == en lugar de === para manejar casos string vs number desde la API
   const yoSoyResponde = Number(quienResponde.id) === Number(userId);
   const yoSoyEspera   = Number(quienEspera.id) === Number(userId);
   const labelEspera   = origenOferta ? 'Esperando al vendedor' : 'Esperando al comprador';
-
-
 
   return (
     <Card className="border-0 shadow-lg hover:shadow-xl transition-shadow">
@@ -663,19 +658,16 @@ function TarjetaPropuesta({ negociacion, userId, isAdmin, onResponder, onCancela
 
           <div className="flex flex-col gap-2 lg:w-48">
             {(yoSoyResponde || isAdmin) ? (
-              // Quien debe responder ve el botón de acción
               <button onClick={() => onResponder(negociacion)}
                 className="w-full h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 shadow-md shadow-green-500/20 transition-all text-sm">
                 Ver y responder →
               </button>
             ) : (
-              // Quien espera ve el estado
               <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-center">
                 <Clock className="w-4 h-4 text-yellow-500 mx-auto mb-1" />
                 <p className="text-xs text-yellow-700 font-medium">{labelEspera}</p>
               </div>
             )}
-            {/* Quien envió la propuesta puede cancelarla */}
             {(yoSoyEspera || isAdmin) && (
               <button onClick={() => onCancelar(negociacion)}
                 className="w-full h-9 rounded-xl font-medium text-gray-500 bg-gray-50 hover:bg-gray-100 transition-colors text-xs">
@@ -812,7 +804,7 @@ function TarjetaEnvio({ negociacion, userId, isAdmin, onPagar, onAdmin }: {
               </button>
             )}
 
-            {/* Recibo PDF — visible para vendedor y comprador cuando ya hay envío en preparación o más */}
+            {/* Recibo PDF */}
             {!isAdmin && ['EN_PREPARACION', 'EN_TRANSITO', 'ENTREGADO'].includes(envio.estadoEnvio) && negociacion.factura && (
               <div className="pt-1">
                 <ReciboPDF negociacion={negociacion} />
@@ -830,8 +822,6 @@ function TarjetaEnvio({ negociacion, userId, isAdmin, onPagar, onAdmin }: {
 // ══════════════════════════════════════════════════
 export default function EnviosPage() {
   const { user, initializing } = useAuth();
-  // /users/me retorna el payload del JWT: { userId, email, role }
-  // userId puede venir como 'userId' o 'id' dependiendo del endpoint
   const userId = user ? Number((user as any).userId ?? (user as any).id ?? 0) : 0;
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
 
@@ -841,6 +831,10 @@ export default function EnviosPage() {
   const [searchTerm, setSearchTerm]       = useState('');
   const [toast, setToast]                 = useState<{ msg: string; ok: boolean } | null>(null);
   const [procesando, setProcesando]       = useState(false);
+
+  // ── Paginación historial ──────────────────────────────────────────────────
+  const HIST_PAGE_SIZE = 8;
+  const [histPage, setHistPage] = useState(1);
 
   // Modales
   const [modalResponder, setModalResponder] = useState<Negociacion | null>(null);
@@ -982,6 +976,15 @@ export default function EnviosPage() {
     (n.estado === 'CONFIRMADA' && n.envio?.estadoEnvio === 'ENTREGADO')
   ));
 
+  // ── Paginación historial ──────────────────────────────────────────────────
+  const histTotalPages = Math.max(1, Math.ceil(historial.length / HIST_PAGE_SIZE));
+  const histPagina     = historial.slice((histPage - 1) * HIST_PAGE_SIZE, histPage * HIST_PAGE_SIZE);
+
+  // Resetear página si el filtro cambia y la página actual queda fuera de rango
+  useEffect(() => {
+    if (histPage > histTotalPages) setHistPage(1);
+  }, [histTotalPages, histPage]);
+
   const totalVolumen = negociaciones
     .filter((n) => n.estado === 'CONFIRMADA')
     .reduce((a, n) => a + n.cantidad * Number(n.precioUnitario), 0);
@@ -1097,51 +1100,95 @@ export default function EnviosPage() {
             ))}
           </TabsContent>
 
-          {/* Historial */}
+          {/* Historial — con paginación */}
           <TabsContent value="historial" className="space-y-3">
             {historial.length === 0 ? (
               <div className="text-center py-16">
                 <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-gray-600 font-medium">Sin historial aún</p>
               </div>
-            ) : historial.map((n) => {
-              const completado = n.envio?.estadoEnvio === 'ENTREGADO' || n.estado === 'COMPLETADA';
-              return (
-                <Card key={n.id} className="border-0 shadow-md opacity-80">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className={`p-2.5 rounded-xl ${completado ? 'bg-green-50' : 'bg-gray-100'}`}>
-                          {completado ? <CheckCircle className="w-5 h-5 text-green-500" /> : <X className="w-5 h-5 text-gray-400" />}
+            ) : (
+              <>
+                {histPagina.map((n) => {
+                  const completado = n.envio?.estadoEnvio === 'ENTREGADO' || n.estado === 'COMPLETADA';
+                  return (
+                    <Card key={n.id} className="border-0 shadow-md opacity-80">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-4">
+                            <div className={`p-2.5 rounded-xl ${completado ? 'bg-green-50' : 'bg-gray-100'}`}>
+                              {completado ? <CheckCircle className="w-5 h-5 text-green-500" /> : <X className="w-5 h-5 text-gray-400" />}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900 text-sm">
+                                {n.cantidad.toLocaleString()} gal — {n.tipoProducto}
+                              </p>
+                              <p className="text-xs text-gray-500">{n.comprador.name} · {n.ciudad}, {n.pais}</p>
+                              {n.factura && (
+                                <p className="text-xs font-semibold text-gray-700 mt-0.5">
+                                  ${Number(n.factura.total).toFixed(2)}
+                                  {n.factura.fondosLiberados && <span className="ml-1 text-green-600">· Fondos liberados</span>}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <Badge className={
+                              completado ? 'bg-green-100 text-green-700 border-0'
+                              : n.estado === 'RECHAZADA' ? 'bg-red-100 text-red-700 border-0'
+                              : 'bg-gray-100 text-gray-600 border-0'
+                            }>
+                              {completado ? 'Completada' : n.estado === 'RECHAZADA' ? 'Rechazada' : 'Cancelada'}
+                            </Badge>
+                            <p className="text-xs text-gray-400 mt-1">{new Date(n.updatedAt).toLocaleDateString('es-CO')}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-gray-900 text-sm">
-                            {n.cantidad.toLocaleString()} gal — {n.tipoProducto}
-                          </p>
-                          <p className="text-xs text-gray-500">{n.comprador.name} · {n.ciudad}, {n.pais}</p>
-                          {n.factura && (
-                            <p className="text-xs font-semibold text-gray-700 mt-0.5">
-                              ${Number(n.factura.total).toFixed(2)}
-                              {n.factura.fondosLiberados && <span className="ml-1 text-green-600">· Fondos liberados</span>}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <Badge className={
-                          completado ? 'bg-green-100 text-green-700 border-0'
-                          : n.estado === 'RECHAZADA' ? 'bg-red-100 text-red-700 border-0'
-                          : 'bg-gray-100 text-gray-600 border-0'
-                        }>
-                          {completado ? 'Completada' : n.estado === 'RECHAZADA' ? 'Rechazada' : 'Cancelada'}
-                        </Badge>
-                        <p className="text-xs text-gray-400 mt-1">{new Date(n.updatedAt).toLocaleDateString('es-CO')}</p>
-                      </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+
+                {/* Paginador */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-4 border-t border-gray-100 mt-2">
+                  <p className="text-xs text-gray-400">
+                    Mostrando{' '}
+                    <span className="font-semibold text-gray-600">
+                      {(histPage - 1) * HIST_PAGE_SIZE + 1}–{Math.min(histPage * HIST_PAGE_SIZE, historial.length)}
+                    </span>{' '}
+                    de{' '}
+                    <span className="font-semibold text-gray-600">{historial.length}</span> registros
+                  </p>
+                  {histTotalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setHistPage((p) => Math.max(1, p - 1))}
+                        disabled={histPage === 1}
+                        className="h-8 w-8 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      {Array.from({ length: histTotalPages }, (_, i) => i + 1).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setHistPage(p)}
+                          className={`h-8 w-8 flex items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+                            p === histPage
+                              ? 'bg-red-500 text-white shadow-sm'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}>
+                          {p}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setHistPage((p) => Math.min(histTotalPages, p + 1))}
+                        disabled={histPage === histTotalPages}
+                        className="h-8 w-8 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  )}
+                </div>
+              </>
+            )}
           </TabsContent>
         </Tabs>
       )}
