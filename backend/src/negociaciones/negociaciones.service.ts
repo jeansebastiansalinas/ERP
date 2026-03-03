@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable, NotFoundException, ForbiddenException, BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNegociacionDto } from './dto/create-negociacion.dto';
 import { UpdateNegociacionDto } from './dto/update-negociacion.dto';
@@ -8,205 +10,147 @@ import { EstadoNegociacion } from '@prisma/client';
 export class NegociacionesService {
   constructor(private prisma: PrismaService) {}
 
+  // ─── include reutilizable ────────────────────────────────────────────────────
+  private readonly inc = {
+    vendedor:  { select: { id: true, name: true, email: true } },
+    comprador: { select: { id: true, name: true, email: true } },
+    oferta:    true,   // ofertaId se incluye automáticamente como campo escalar
+    solicitud: true,   // solicitudId igual
+    envio:     true,
+    factura:   true,
+  };
+
+  // Nota: Prisma siempre retorna los campos escalares (ofertaId, solicitudId)
+  // junto con las relaciones incluidas — no es necesario declararlos extra.
+
   // ════════════════════════════════════════════════
-  // CREAR NEGOCIACIÓN + NOTIFICAR CONTRAPARTE
+  // CREAR + notificar contraparte
   // ════════════════════════════════════════════════
-  async create(createNegociacionDto: CreateNegociacionDto) {
-    if (!createNegociacionDto.ofertaId && !createNegociacionDto.solicitudId) {
+  async create(dto: CreateNegociacionDto) {
+    if (!dto.ofertaId && !dto.solicitudId) {
       throw new BadRequestException('Debe especificar una oferta o solicitud');
     }
-
-    if (createNegociacionDto.ofertaId) {
-      const oferta = await this.prisma.ofertaVenta.findUnique({
-        where: { id: createNegociacionDto.ofertaId },
-      });
+    if (dto.ofertaId) {
+      const oferta = await this.prisma.ofertaVenta.findUnique({ where: { id: dto.ofertaId } });
       if (!oferta) throw new NotFoundException('Oferta no encontrada');
     }
-
-    if (createNegociacionDto.solicitudId) {
-      const solicitud = await this.prisma.solicitudCompra.findUnique({
-        where: { id: createNegociacionDto.solicitudId },
-      });
+    if (dto.solicitudId) {
+      const solicitud = await this.prisma.solicitudCompra.findUnique({ where: { id: dto.solicitudId } });
       if (!solicitud) throw new NotFoundException('Solicitud no encontrada');
     }
 
-    const negociacion = await this.prisma.negociacion.create({
-      data: {
-        ...createNegociacionDto,
-        precioUnitario: createNegociacionDto.precioUnitario,
-        costoFlete: createNegociacionDto.costoFlete || 0,
-      },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-        oferta: true,
-        solicitud: true,
-      },
+    const neg = await this.prisma.negociacion.create({
+      data: { ...dto, precioUnitario: dto.precioUnitario, costoFlete: dto.costoFlete || 0 },
+      include: this.inc,
     });
 
-    // ── Notificar a la contraparte ──────────────────
-    // solicitudId  → vendedor contactó al comprador  → notificar al COMPRADOR
-    // ofertaId     → comprador contactó al vendedor  → notificar al VENDEDOR
-    const destinatarioId = createNegociacionDto.solicitudId
-      ? negociacion.compradorId
-      : negociacion.vendedorId;
-
-    const remitenteNombre = createNegociacionDto.solicitudId
-      ? negociacion.vendedor.name
-      : negociacion.comprador.name;
+    // Notificar a la contraparte
+    const destinatarioId  = dto.solicitudId ? neg.compradorId  : neg.vendedorId;
+    const remitenteNombre = dto.solicitudId ? neg.vendedor.name : neg.comprador.name;
 
     await this.prisma.notificacion.create({
       data: {
         usuarioId: destinatarioId,
         tipo: 'NUEVA_PROPUESTA',
         titulo: 'Nueva propuesta recibida 📦',
-        mensaje: `${remitenteNombre} te envió una propuesta de ${negociacion.cantidad.toLocaleString()} galones a $${Number(negociacion.precioUnitario).toFixed(2)}/gal.`,
-        negociacionId: negociacion.id,
+        mensaje: `${remitenteNombre} te envió una propuesta de ${neg.cantidad.toLocaleString()} galones a $${Number(neg.precioUnitario).toFixed(2)}/gal.`,
+        negociacionId: neg.id,
       },
     });
 
-    return negociacion;
+    return neg;
   }
 
   // ════════════════════════════════════════════════
-  // LISTAR TODAS LAS NEGOCIACIONES (Admin)
+  // LISTAR TODAS (Admin)
   // ════════════════════════════════════════════════
-  async findAll(filters?: {
-    estado?: EstadoNegociacion;
-    vendedorId?: number;
-    compradorId?: number;
-  }) {
+  async findAll(filters?: { estado?: EstadoNegociacion; vendedorId?: number; compradorId?: number }) {
     return this.prisma.negociacion.findMany({
       where: {
-        ...(filters?.estado && { estado: filters.estado }),
-        ...(filters?.vendedorId && { vendedorId: filters.vendedorId }),
+        ...(filters?.estado      && { estado:      filters.estado }),
+        ...(filters?.vendedorId  && { vendedorId:  filters.vendedorId }),
         ...(filters?.compradorId && { compradorId: filters.compradorId }),
       },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-        oferta: true,
-        solicitud: true,
-        envio: true,
-        factura: true,
-      },
+      include: this.inc,
       orderBy: { createdAt: 'desc' },
     });
   }
 
   // ════════════════════════════════════════════════
-  // MIS NEGOCIACIONES (vendedor o comprador)
+  // MIS NEGOCIACIONES
   // ════════════════════════════════════════════════
   async findMyNegociaciones(userId: number) {
-    // userId viene de req.user.sub (JWT payload: { sub: user.id })
-    const id = Number(userId);
     return this.prisma.negociacion.findMany({
-      where: {
-        OR: [{ vendedorId: id }, { compradorId: id }],
-      },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-        oferta: true,
-        solicitud: true,
-        envio: true,
-        factura: true,
-      },
+      where: { OR: [{ vendedorId: Number(userId) }, { compradorId: Number(userId) }] },
+      include: this.inc,
       orderBy: { createdAt: 'desc' },
     });
   }
 
   // ════════════════════════════════════════════════
-  // OBTENER UNA POR ID
+  // UNA POR ID
   // ════════════════════════════════════════════════
   async findOne(id: string) {
-    const negociacion = await this.prisma.negociacion.findUnique({
-      where: { id },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-        oferta: true,
-        solicitud: true,
-        envio: true,
-        factura: true,
-      },
-    });
-
-    if (!negociacion) {
-      throw new NotFoundException(`Negociación ${id} no encontrada`);
-    }
-
-    return negociacion;
+    const neg = await this.prisma.negociacion.findUnique({ where: { id }, include: this.inc });
+    if (!neg) throw new NotFoundException(`Negociación ${id} no encontrada`);
+    return neg;
   }
 
   // ════════════════════════════════════════════════
-  // ACTUALIZAR
+  // ACTUALIZAR GENERAL
   // ════════════════════════════════════════════════
-  async update(id: string, updateNegociacionDto: UpdateNegociacionDto, userId: number) {
-    const negociacion = await this.findOne(id);
-
-    if (negociacion.vendedorId !== userId && negociacion.compradorId !== userId) {
-      throw new ForbiddenException('No tienes permiso para actualizar esta negociación');
+  async update(id: string, dto: UpdateNegociacionDto, userId: number) {
+    const neg = await this.findOne(id);
+    if (neg.vendedorId !== userId && neg.compradorId !== userId) {
+      throw new ForbiddenException('No tienes permiso');
     }
-
-    return this.prisma.negociacion.update({
-      where: { id },
-      data: updateNegociacionDto,
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-        oferta: true,
-        solicitud: true,
-        envio: true,
-        factura: true,
-      },
-    });
+    return this.prisma.negociacion.update({ where: { id }, data: dto, include: this.inc });
   }
 
   // ════════════════════════════════════════════════
-  // ACEPTAR → crea Envío + Factura + notifica comprador
+  // ACEPTAR → crea Envío + Factura + notifica
+  // ofertaId → vendedor acepta | solicitudId → comprador acepta
   // ════════════════════════════════════════════════
-  async aceptar(id: string, vendedorId: number, notasVendedor?: string) {
-    const negociacion = await this.findOne(id);
+  async aceptar(id: string, userId: number, notasVendedor?: string) {
+    const neg = await this.findOne(id);
 
-    if (negociacion.vendedorId !== vendedorId) {
-      throw new ForbiddenException('Solo el vendedor puede aceptar esta negociación');
+    // Determinar quién debe aceptar según el origen
+    const quienRespondeId = neg.ofertaId ? neg.vendedorId : neg.compradorId;
+    if (quienRespondeId !== userId) {
+      throw new ForbiddenException('No tienes permiso para aceptar esta propuesta');
     }
-
-    if (negociacion.estado !== EstadoNegociacion.ESPERANDO_CONFIRMACION) {
+    if (neg.estado !== EstadoNegociacion.ESPERANDO_CONFIRMACION) {
       throw new BadRequestException('La negociación no está esperando confirmación');
     }
 
-    // 1. Marcar como CONFIRMADA
-    const negociacionActualizada = await this.prisma.negociacion.update({
+    // Notificar a quien envió la propuesta
+    const destinatarioId = neg.ofertaId ? neg.compradorId : neg.vendedorId;
+
+    // 1. Confirmar negociación
+    const updated = await this.prisma.negociacion.update({
       where: { id },
       data: { estado: EstadoNegociacion.CONFIRMADA, notasVendedor },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
-      },
+      include: this.inc,
     });
 
-    // 2. Crear Envío automáticamente
-    const origenTexto = negociacion.oferta?.ubicacion
-      ?? negociacion.solicitud?.ciudad
-      ?? negociacion.ciudad;
-
+    // 2. Crear Envío
+    const origen = neg.oferta?.ubicacion ?? neg.solicitud?.ciudad ?? neg.ciudad;
     await this.prisma.envio.create({
       data: {
         negociacionId: id,
-        origen: origenTexto,
-        destino: negociacion.direccionEntrega,
+        origen,
+        destino: neg.direccionEntrega,
         estadoEnvio: 'PENDIENTE',
-        fechaEntregaEst: negociacion.solicitud?.fechaRequerida ?? null,
+        progresoEstimado: 5,
+        fechaEntregaEst: neg.solicitud?.fechaRequerida ?? null,
       },
     });
 
-    // 3. Crear Factura automáticamente
-    const subtotal = Number(negociacion.cantidad) * Number(negociacion.precioUnitario);
-    const costoFlete = Number(negociacion.costoFlete ?? 0);
-    const comisionPlataforma = subtotal * 0.02; // 2% de comisión
-    const total = subtotal + costoFlete + comisionPlataforma;
+    // 3. Crear Factura
+    const subtotal           = Number(neg.cantidad) * Number(neg.precioUnitario);
+    const costoFlete         = Number(neg.costoFlete ?? 0);
+    const comisionPlataforma = subtotal * 0.02;
+    const total              = subtotal + costoFlete + comisionPlataforma;
 
     await this.prisma.factura.create({
       data: {
@@ -219,92 +163,253 @@ export class NegociacionesService {
       },
     });
 
-    // 4. Notificar al comprador
+    // 4. Notificar a quien envió la propuesta
     await this.prisma.notificacion.create({
       data: {
-        usuarioId: negociacion.compradorId,
+        usuarioId: destinatarioId,
         tipo: 'PROPUESTA_ACEPTADA',
         titulo: '¡Tu propuesta fue aceptada! 🎉',
-        mensaje: `${negociacion.vendedor.name} aceptó tu solicitud de ${negociacion.cantidad.toLocaleString()} galones a $${Number(negociacion.precioUnitario).toFixed(2)}/gal. Revisa tu envío en progreso.`,
+        mensaje: `La propuesta de ${neg.cantidad.toLocaleString()} galones de ${neg.tipoProducto} fue aceptada. Realiza el pago para continuar.`,
         negociacionId: id,
       },
     });
 
-    return negociacionActualizada;
+    return updated;
   }
 
   // ════════════════════════════════════════════════
-  // RECHAZAR + notifica comprador
+  // RECHAZAR — quien debe responder rechaza
+  // ofertaId → vendedor rechaza | solicitudId → comprador rechaza
   // ════════════════════════════════════════════════
-  async rechazar(id: string, vendedorId: number, motivo?: string) {
-    const negociacion = await this.findOne(id);
+  async rechazar(id: string, userId: number, motivo?: string) {
+    const neg = await this.findOne(id);
 
-    if (negociacion.vendedorId !== vendedorId) {
-      throw new ForbiddenException('Solo el vendedor puede rechazar esta negociación');
+    // Determinar quién debe responder según el origen
+    const quienRespondeId = neg.ofertaId ? neg.vendedorId : neg.compradorId;
+    if (quienRespondeId !== userId) {
+      throw new ForbiddenException('No tienes permiso para rechazar esta propuesta');
     }
 
-    const negociacionActualizada = await this.prisma.negociacion.update({
+    // Notificar a quien envió la propuesta
+    const destinatarioId  = neg.ofertaId ? neg.compradorId : neg.vendedorId;
+    const remitenteNombre = neg.ofertaId ? neg.vendedor.name : neg.comprador.name;
+
+    const updated = await this.prisma.negociacion.update({
       where: { id },
-      data: { estado: EstadoNegociacion.RECHAZADA, notasVendedor: motivo },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
+      data: {
+        estado: EstadoNegociacion.RECHAZADA,
+        ...(neg.ofertaId ? { notasVendedor: motivo } : { notasComprador: motivo }),
       },
+      include: this.inc,
     });
 
-    // Notificar al comprador
     await this.prisma.notificacion.create({
       data: {
-        usuarioId: negociacion.compradorId,
+        usuarioId: destinatarioId,
         tipo: 'PROPUESTA_RECHAZADA',
         titulo: 'Propuesta rechazada ❌',
         mensaje: motivo
           ? `Tu propuesta fue rechazada. Motivo: ${motivo}`
-          : `${negociacion.vendedor.name} rechazó tu propuesta de ${negociacion.cantidad.toLocaleString()} galones.`,
+          : `${remitenteNombre} rechazó tu propuesta de ${neg.cantidad.toLocaleString()} galones.`,
         negociacionId: id,
       },
     });
 
-    return negociacionActualizada;
+    return updated;
   }
 
   // ════════════════════════════════════════════════
-  // CANCELAR (comprador cancela) + notifica vendedor
+  // CANCELAR — quien envió la propuesta la cancela
+  // ofertaId → comprador cancela | solicitudId → vendedor cancela
   // ════════════════════════════════════════════════
-  async cancelar(id: string, compradorId: number, motivo?: string) {
-    const negociacion = await this.findOne(id);
+  async cancelar(id: string, userId: number, motivo?: string) {
+    const neg = await this.findOne(id);
 
-    if (negociacion.compradorId !== compradorId) {
-      throw new ForbiddenException('Solo el comprador puede cancelar esta negociación');
+    // Quien esperaba respuesta es quien puede cancelar
+    const quienEsperaId   = neg.ofertaId ? neg.compradorId : neg.vendedorId;
+    if (quienEsperaId !== userId) {
+      throw new ForbiddenException('No tienes permiso para cancelar esta propuesta');
     }
 
-    const negociacionActualizada = await this.prisma.negociacion.update({
+    // Notificar a quien debía responder
+    const destinatarioId   = neg.ofertaId ? neg.vendedorId : neg.compradorId;
+    const canceladorNombre = neg.ofertaId ? neg.comprador.name : neg.vendedor.name;
+
+    const updated = await this.prisma.negociacion.update({
       where: { id },
-      data: { estado: EstadoNegociacion.CANCELADA, notasComprador: motivo },
-      include: {
-        vendedor: { select: { id: true, name: true, email: true } },
-        comprador: { select: { id: true, name: true, email: true } },
+      data: {
+        estado: EstadoNegociacion.CANCELADA,
+        ...(neg.ofertaId ? { notasComprador: motivo } : { notasVendedor: motivo }),
       },
+      include: this.inc,
     });
 
-    // Notificar al vendedor
     await this.prisma.notificacion.create({
       data: {
-        usuarioId: negociacion.vendedorId,
+        usuarioId: destinatarioId,
         tipo: 'PROPUESTA_RECHAZADA',
         titulo: 'Propuesta cancelada',
         mensaje: motivo
-          ? `${negociacion.comprador.name} canceló la propuesta. Motivo: ${motivo}`
-          : `${negociacion.comprador.name} canceló la propuesta de ${negociacion.cantidad.toLocaleString()} galones.`,
+          ? `${canceladorNombre} canceló la propuesta. Motivo: ${motivo}`
+          : `${canceladorNombre} canceló la propuesta de ${neg.cantidad.toLocaleString()} galones.`,
         negociacionId: id,
       },
     });
 
-    return negociacionActualizada;
+    return updated;
   }
 
   // ════════════════════════════════════════════════
-  // ELIMINAR (Solo admin)
+  // COMPROBANTE DE PAGO — comprador sube URL
+  // ════════════════════════════════════════════════
+  async subirComprobante(id: string, comprobanteURL: string, metodoPago: string, compradorId: number) {
+    const neg = await this.findOne(id);
+
+    if (neg.compradorId !== compradorId) {
+      throw new ForbiddenException('Solo el comprador puede subir el comprobante');
+    }
+    if (!neg.factura) {
+      throw new BadRequestException('Esta negociación no tiene factura generada');
+    }
+    if (!['PENDIENTE', 'RECHAZADO'].includes(neg.factura.estadoPago)) {
+      throw new BadRequestException('El pago ya fue procesado o está en revisión');
+    }
+
+    const factura = await this.prisma.factura.update({
+      where: { negociacionId: id },
+      data: { comprobanteURL, metodoPago, estadoPago: 'COMPROBANTE_SUBIDO' },
+    });
+
+    // Notificar a todos los admins
+    const admins = await this.prisma.user.findMany({
+      where: { role: { name: { in: ['ADMIN', 'SUPER_ADMIN'] } } },
+      select: { id: true },
+    });
+
+    if (admins.length > 0) {
+      await this.prisma.notificacion.createMany({
+        data: admins.map((a) => ({
+          usuarioId: a.id,
+          tipo: 'NUEVA_PROPUESTA',
+          titulo: 'Comprobante de pago subido 📎',
+          mensaje: `${neg.comprador.name} subió comprobante via ${metodoPago} por $${Number(neg.factura!.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}. Revisa y confirma.`,
+          negociacionId: id,
+        })),
+      });
+    }
+
+    return factura;
+  }
+
+  // ════════════════════════════════════════════════
+  // CONFIRMAR PAGO (Admin)
+  // ════════════════════════════════════════════════
+  async confirmarPago(id: string) {
+    const neg = await this.findOne(id);
+    if (!neg.factura) throw new BadRequestException('Sin factura');
+    if (neg.factura.estadoPago !== 'COMPROBANTE_SUBIDO') {
+      throw new BadRequestException('No hay comprobante pendiente de revisión');
+    }
+
+    // 1. Confirmar pago en factura
+    const factura = await this.prisma.factura.update({
+      where: { negociacionId: id },
+      data: { estadoPago: 'CONFIRMADO' },
+    });
+
+    // 2. Avanzar envío a PAGADO
+    if (neg.envio) {
+      await this.prisma.envio.update({
+        where: { negociacionId: id },
+        data: { estadoEnvio: 'PAGADO', progresoEstimado: 25 },
+      });
+    }
+
+    // 3. Notificar a ambas partes
+    await this.prisma.notificacion.createMany({
+      data: [
+        {
+          usuarioId: neg.vendedorId,
+          tipo: 'PROPUESTA_ACEPTADA',
+          titulo: '¡Pago confirmado — prepara el pedido! 💰',
+          mensaje: `El pago de ${neg.comprador.name} fue verificado. Prepara ${neg.cantidad.toLocaleString()} galones de ${neg.tipoProducto} para despachar.`,
+          negociacionId: id,
+        },
+        {
+          usuarioId: neg.compradorId,
+          tipo: 'PROPUESTA_ACEPTADA',
+          titulo: '¡Pago verificado! ✅',
+          mensaje: `Tu pago fue confirmado por el administrador. El vendedor comenzará a preparar tu pedido.`,
+          negociacionId: id,
+        },
+      ],
+    });
+
+    return factura;
+  }
+
+  // ════════════════════════════════════════════════
+  // RECHAZAR COMPROBANTE (Admin)
+  // ════════════════════════════════════════════════
+  async rechazarPago(id: string, motivo?: string) {
+    const neg = await this.findOne(id);
+    if (!neg.factura) throw new BadRequestException('Sin factura');
+
+    const factura = await this.prisma.factura.update({
+      where: { negociacionId: id },
+      data: { estadoPago: 'RECHAZADO' },
+    });
+
+    await this.prisma.notificacion.create({
+      data: {
+        usuarioId: neg.compradorId,
+        tipo: 'PROPUESTA_RECHAZADA',
+        titulo: 'Comprobante rechazado ❌',
+        mensaje: motivo
+          ? `Tu comprobante fue rechazado. Motivo: ${motivo}. Sube un nuevo comprobante.`
+          : `Tu comprobante de pago fue rechazado. Por favor sube un comprobante válido.`,
+        negociacionId: id,
+      },
+    });
+
+    return factura;
+  }
+
+  // ════════════════════════════════════════════════
+  // LIBERAR FONDOS AL VENDEDOR (Admin, post-entrega)
+  // ════════════════════════════════════════════════
+  async liberarFondos(id: string) {
+    const neg = await this.findOne(id);
+    if (!neg.factura)                          throw new BadRequestException('Sin factura');
+    if (neg.factura.estadoPago !== 'CONFIRMADO') throw new BadRequestException('El pago no está confirmado');
+    if (neg.factura.fondosLiberados)             throw new BadRequestException('Los fondos ya fueron liberados');
+
+    const factura = await this.prisma.factura.update({
+      where: { negociacionId: id },
+      data: { fondosLiberados: true, fechaLiberacion: new Date() },
+    });
+
+    // Marcar negociación como COMPLETADA
+    await this.prisma.negociacion.update({
+      where: { id },
+      data: { estado: EstadoNegociacion.COMPLETADA },
+    });
+
+    await this.prisma.notificacion.create({
+      data: {
+        usuarioId: neg.vendedorId,
+        tipo: 'PROPUESTA_ACEPTADA',
+        titulo: '¡Fondos liberados a tu cuenta! 🏦',
+        mensaje: `Se liberaron $${Number(neg.factura.total).toLocaleString('en-US', { minimumFractionDigits: 2 })} a tu cuenta. La negociación está completada.`,
+        negociacionId: id,
+      },
+    });
+
+    return factura;
+  }
+
+  // ════════════════════════════════════════════════
+  // ELIMINAR (Admin)
   // ════════════════════════════════════════════════
   async remove(id: string) {
     await this.findOne(id);

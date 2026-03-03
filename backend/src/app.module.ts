@@ -12,6 +12,7 @@ import { OfertasModule } from './ofertas/ofertas.module';
 import { SolicitudesModule } from './solicitudes/solicitudes.module'; 
 import { NegociacionesModule } from './negociaciones/negociaciones.module'; 
 import { NotificacionesModule } from './notificaciones/notificaciones.module';
+import { EnviosModule } from './envios/envios.module';
 
 
 
@@ -27,6 +28,7 @@ import { NotificacionesModule } from './notificaciones/notificaciones.module';
     OfertasModule,
     NegociacionesModule,
     NotificacionesModule,
+    EnviosModule,
     SolicitudesModule, // ← NUEVO
   ],
   controllers: [AppController],

@@ -2,7 +2,6 @@ import { getCookie } from '@/lib/cookies';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
-// 📖 Tipos que reflejan exactamente lo que devuelve el backend
 export interface OfertaVenta {
   id: string;
   tipoProducto: 'DIESEL' | 'GASOLINA_CORRIENTE' | 'GASOLINA_EXTRA' | 'JET_FUEL' | 'GLP';
@@ -16,13 +15,9 @@ export interface OfertaVenta {
   descripcion?: string;
   incluyeFlete: boolean;
   radioEntrega?: number;
-  estado: 'ACTIVA' | 'PAUSADA' | 'VENDIDA' | 'EXPIRADA';
+  estado: 'ACTIVA' | 'PAUSADA' | 'VENDIDA' | 'EXPIRADA' | 'INACTIVA';
   vendedorId: number;
-  vendedor: {
-    id: number;
-    name: string;
-    email: string;
-  };
+  vendedor: { id: number; name: string; email: string };
   createdAt: string;
 }
 
@@ -40,7 +35,11 @@ export interface CreateOfertaData {
   radioEntrega?: number;
 }
 
-// 📖 Función helper para obtener headers con el token
+// ← NUEVO: para editar solo los campos que cambian
+export type UpdateOfertaData = Partial<CreateOfertaData> & {
+  estado?: 'ACTIVA' | 'INACTIVA' | 'PAUSADA' | 'VENDIDA' | 'EXPIRADA';
+};
+
 function getAuthHeaders(): HeadersInit {
   const token = getCookie('token');
   return {
@@ -49,9 +48,7 @@ function getAuthHeaders(): HeadersInit {
   };
 }
 
-// ════════════════════════════════════════════════
-// GET /api/ofertas — Listar todas las ofertas activas
-// ════════════════════════════════════════════════
+// GET /api/ofertas
 export async function getOfertas(filters?: {
   tipoProducto?: string;
   ciudad?: string;
@@ -59,56 +56,55 @@ export async function getOfertas(filters?: {
 }): Promise<OfertaVenta[]> {
   const params = new URLSearchParams();
   if (filters?.tipoProducto) params.append('tipoProducto', filters.tipoProducto);
-  if (filters?.ciudad) params.append('ciudad', filters.ciudad);
+  if (filters?.ciudad)       params.append('ciudad', filters.ciudad);
   if (filters?.precioMaximo) params.append('precioMaximo', String(filters.precioMaximo));
-
   const query = params.toString() ? `?${params.toString()}` : '';
 
-  const res = await fetch(`${API_URL}/ofertas${query}`, {
-    headers: getAuthHeaders(),
-  });
-
+  const res = await fetch(`${API_URL}/ofertas${query}`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Error al obtener ofertas');
   return res.json();
 }
 
-// ════════════════════════════════════════════════
-// GET /api/ofertas/mis-ofertas — Mis ofertas (vendedor)
-// ════════════════════════════════════════════════
+// GET /api/ofertas/mis-ofertas  ← ya existía
 export async function getMisOfertas(): Promise<OfertaVenta[]> {
-  const res = await fetch(`${API_URL}/ofertas/mis-ofertas`, {
-    headers: getAuthHeaders(),
-  });
-
+  const res = await fetch(`${API_URL}/ofertas/mis-ofertas`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Error al obtener tus ofertas');
   return res.json();
 }
 
-// ════════════════════════════════════════════════
-// POST /api/ofertas — Crear oferta
-// ════════════════════════════════════════════════
+// POST /api/ofertas  ← ya existía
 export async function createOferta(data: CreateOfertaData): Promise<OfertaVenta> {
   const res = await fetch(`${API_URL}/ofertas`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
-
   if (!res.ok) {
-    const error = await res.json();
+    const error = await res.json().catch(() => ({}));
     throw new Error(error.message || 'Error al crear oferta');
   }
   return res.json();
 }
 
-// ════════════════════════════════════════════════
-// DELETE /api/ofertas/:id — Eliminar oferta
-// ════════════════════════════════════════════════
+// PATCH /api/ofertas/:id  ← NUEVO
+export async function updateOferta(id: string, data: UpdateOfertaData): Promise<OfertaVenta> {
+  const res = await fetch(`${API_URL}/ofertas/${id}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Error al actualizar oferta');
+  }
+  return res.json();
+}
+
+// DELETE /api/ofertas/:id  ← ya existía
 export async function deleteOferta(id: string): Promise<void> {
   const res = await fetch(`${API_URL}/ofertas/${id}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
-
   if (!res.ok) throw new Error('Error al eliminar oferta');
 }

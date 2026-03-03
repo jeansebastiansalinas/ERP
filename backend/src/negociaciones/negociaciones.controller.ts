@@ -1,14 +1,6 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  UseGuards,
-  Request,
-  Query,
+  Controller, Get, Post, Body, Patch,
+  Param, Delete, UseGuards, Request, Query,
 } from '@nestjs/common';
 import { NegociacionesService } from './negociaciones.service';
 import { CreateNegociacionDto } from './dto/create-negociacion.dto';
@@ -23,31 +15,26 @@ import { RoleName, EstadoNegociacion } from '@prisma/client';
 export class NegociacionesController {
   constructor(private readonly negociacionesService: NegociacionesService) {}
 
-  // JwtStrategy retorna: { userId: payload.sub, email, role }
-  private uid(req: any): number {
-    return Number(req.user.userId);
-  }
+  private uid(req: any): number { return Number(req.user.userId); }
 
   // ════════════════════════════════════════════════
-  // POST /negociaciones - Crear negociación
+  // POST /negociaciones — Crear negociación
   // ════════════════════════════════════════════════
   @Post()
-  create(@Body() createNegociacionDto: CreateNegociacionDto) {
-    return this.negociacionesService.create(createNegociacionDto);
+  create(@Body() dto: CreateNegociacionDto) {
+    return this.negociacionesService.create(dto);
   }
 
   // ════════════════════════════════════════════════
-  // GET /negociaciones/mis
-  // FIXES: era "mis-negociaciones", el front llama "mis"
-  // FIXES: era this.uid(req), el JWT usa this.uid(req)
+  // GET /negociaciones/mis — Mis negociaciones
   // ════════════════════════════════════════════════
   @Get('mis')
-  findMyNegociaciones(@Request() req) {
+  findMis(@Request() req) {
     return this.negociacionesService.findMyNegociaciones(this.uid(req));
   }
 
   // ════════════════════════════════════════════════
-  // GET /negociaciones - Listar todas (Admin)
+  // GET /negociaciones — Todas (Admin)
   // ════════════════════════════════════════════════
   @Get()
   @UseGuards(RolesGuard)
@@ -65,7 +52,7 @@ export class NegociacionesController {
   }
 
   // ════════════════════════════════════════════════
-  // GET /negociaciones/:id - Ver una negociación
+  // GET /negociaciones/:id — Ver una
   // ════════════════════════════════════════════════
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -73,26 +60,21 @@ export class NegociacionesController {
   }
 
   // ════════════════════════════════════════════════
-  // PATCH /negociaciones/:id - Actualizar general
-  // FIXES: this.uid(req) → this.uid(req)
+  // PATCH /negociaciones/:id — Actualizar general
   // ════════════════════════════════════════════════
   @Patch(':id')
   update(
     @Param('id') id: string,
-    @Body() updateNegociacionDto: UpdateNegociacionDto,
+    @Body() dto: UpdateNegociacionDto,
     @Request() req,
   ) {
-    return this.negociacionesService.update(id, updateNegociacionDto, this.uid(req));
+    return this.negociacionesService.update(id, dto, this.uid(req));
   }
 
   // ════════════════════════════════════════════════
-  // PATCH /negociaciones/:id/aceptar - Vendedor acepta
-  // FIXES: era @Post, el front usa PATCH
-  // FIXES: this.uid(req) → this.uid(req)
+  // PATCH /negociaciones/:id/aceptar
   // ════════════════════════════════════════════════
   @Patch(':id/aceptar')
-  @UseGuards(RolesGuard)
-  @Roles(RoleName.VENDEDOR, RoleName.ADMIN, RoleName.SUPER_ADMIN)
   aceptar(
     @Param('id') id: string,
     @Body('notasVendedor') notasVendedor: string,
@@ -102,13 +84,9 @@ export class NegociacionesController {
   }
 
   // ════════════════════════════════════════════════
-  // PATCH /negociaciones/:id/rechazar - Vendedor rechaza
-  // FIXES: era @Post, el front usa PATCH
-  // FIXES: this.uid(req) → this.uid(req)
+  // PATCH /negociaciones/:id/rechazar
   // ════════════════════════════════════════════════
   @Patch(':id/rechazar')
-  @UseGuards(RolesGuard)
-  @Roles(RoleName.VENDEDOR, RoleName.ADMIN, RoleName.SUPER_ADMIN)
   rechazar(
     @Param('id') id: string,
     @Body('motivo') motivo: string,
@@ -118,13 +96,9 @@ export class NegociacionesController {
   }
 
   // ════════════════════════════════════════════════
-  // PATCH /negociaciones/:id/cancelar - Cliente cancela
-  // FIXES: era @Post, el front usa PATCH
-  // FIXES: this.uid(req) → this.uid(req)
+  // PATCH /negociaciones/:id/cancelar
   // ════════════════════════════════════════════════
   @Patch(':id/cancelar')
-  @UseGuards(RolesGuard)
-  @Roles(RoleName.COMPRADOR, RoleName.ADMIN, RoleName.SUPER_ADMIN)
   cancelar(
     @Param('id') id: string,
     @Body('motivo') motivo: string,
@@ -134,7 +108,56 @@ export class NegociacionesController {
   }
 
   // ════════════════════════════════════════════════
-  // DELETE /negociaciones/:id - Eliminar (Admin)
+  // PATCH /negociaciones/:id/comprobante
+  // Comprador sube URL del comprobante de pago
+  // ════════════════════════════════════════════════
+  @Patch(':id/comprobante')
+  @UseGuards(RolesGuard)
+  @Roles(RoleName.COMPRADOR, RoleName.ADMIN, RoleName.SUPER_ADMIN)
+  subirComprobante(
+    @Param('id') id: string,
+    @Body('comprobanteURL') comprobanteURL: string,
+    @Body('metodoPago') metodoPago: string,
+    @Request() req,
+  ) {
+    return this.negociacionesService.subirComprobante(id, comprobanteURL, metodoPago, this.uid(req));
+  }
+
+  // ════════════════════════════════════════════════
+  // PATCH /negociaciones/:id/confirmar-pago — Admin confirma
+  // ════════════════════════════════════════════════
+  @Patch(':id/confirmar-pago')
+  @UseGuards(RolesGuard)
+  @Roles(RoleName.ADMIN, RoleName.SUPER_ADMIN)
+  confirmarPago(@Param('id') id: string) {
+    return this.negociacionesService.confirmarPago(id);
+  }
+
+  // ════════════════════════════════════════════════
+  // PATCH /negociaciones/:id/rechazar-pago — Admin rechaza comprobante
+  // ════════════════════════════════════════════════
+  @Patch(':id/rechazar-pago')
+  @UseGuards(RolesGuard)
+  @Roles(RoleName.ADMIN, RoleName.SUPER_ADMIN)
+  rechazarPago(
+    @Param('id') id: string,
+    @Body('motivo') motivo?: string,
+  ) {
+    return this.negociacionesService.rechazarPago(id, motivo);
+  }
+
+  // ════════════════════════════════════════════════
+  // PATCH /negociaciones/:id/liberar-fondos — Admin libera fondos
+  // ════════════════════════════════════════════════
+  @Patch(':id/liberar-fondos')
+  @UseGuards(RolesGuard)
+  @Roles(RoleName.ADMIN, RoleName.SUPER_ADMIN)
+  liberarFondos(@Param('id') id: string) {
+    return this.negociacionesService.liberarFondos(id);
+  }
+
+  // ════════════════════════════════════════════════
+  // DELETE /negociaciones/:id — Eliminar (Admin)
   // ════════════════════════════════════════════════
   @Delete(':id')
   @UseGuards(RolesGuard)
