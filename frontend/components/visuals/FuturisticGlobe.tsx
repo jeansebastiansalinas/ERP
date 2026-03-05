@@ -30,7 +30,7 @@ function WireGlobe({
   });
   
   return (
-    <mesh ref={ref} position={[-2, 0, 0]}> {/* ⬅️ MOVIDA A LA IZQUIERDA */}
+    <mesh ref={ref} position={[-2, 0, 0]}>
       <sphereGeometry args={[radius, 32, 32]} />
       <meshBasicMaterial
         ref={materialRef}
@@ -86,18 +86,21 @@ function StarField() {
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
+          args={[positions, 3]}
           count={positions.length / 3}
           array={positions}
           itemSize={3}
         />
         <bufferAttribute
           attach="attributes-color"
+          args={[colors, 3]}
           count={colors.length / 3}
           array={colors}
           itemSize={3}
         />
         <bufferAttribute
           attach="attributes-size"
+          args={[sizes, 1]}
           count={sizes.length}
           array={sizes}
           itemSize={1}
@@ -133,7 +136,7 @@ function EnergyParticles() {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI;
       
-      positions[i * 3] = distance * Math.sin(phi) * Math.cos(theta) - 2; // ⬅️ -2 en X
+      positions[i * 3] = distance * Math.sin(phi) * Math.cos(theta) - 2;
       positions[i * 3 + 1] = distance * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = distance * Math.cos(phi);
       
@@ -177,12 +180,14 @@ function EnergyParticles() {
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
+          args={[positions, 3]}
           count={positions.length / 3}
           array={positions}
           itemSize={3}
         />
         <bufferAttribute
           attach="attributes-color"
+          args={[colors, 3]}
           count={colors.length / 3}
           array={colors}
           itemSize={3}
@@ -229,7 +234,7 @@ function AdvancedOrbitalRings() {
   });
   
   return (
-    <group ref={ringsRef} position={[-2, 0, 0]}> {/* ⬅️ MOVIDO A LA IZQUIERDA */}
+    <group ref={ringsRef} position={[-2, 0, 0]}>
       {rings.map((ring, i) => (
         <mesh key={i} rotation={[Math.PI / 4, 0, Math.PI / 6]}>
           <torusGeometry args={[ring.radius, ring.thickness, 16, 100]} />
@@ -258,7 +263,7 @@ function EnergyWaves() {
   );
   
   return (
-    <group ref={wavesRef} position={[-2, 0, 0]}> {/* ⬅️ MOVIDO A LA IZQUIERDA */}
+    <group ref={wavesRef} position={[-2, 0, 0]}>
       {waves.map((_, i) => (
         <mesh key={i}>
           <sphereGeometry args={[1, 32, 32]} />
@@ -297,7 +302,7 @@ function IntelligentDataNodes() {
         const time = clock.getElapsedTime();
         const angle = data.angle + time * data.speed + data.offset;
         
-        node.position.x = Math.cos(angle) * data.radius - 2; // ⬅️ -2 en X
+        node.position.x = Math.cos(angle) * data.radius - 2;
         node.position.y = Math.sin(angle) * data.radius + Math.sin(time * 2 + i) * data.height;
         node.position.z = Math.sin(time * 0.5 + i) * 0.4;
         
@@ -431,7 +436,7 @@ function TruckImageOverlay() {
     truckSceneRef.current = truckScene;
     
     const truckGroup = new THREE.Group();
-    truckGroup.position.set(-1.5, 0.02, 1.5); // ⬅️ CAMBIO: Z = 1.5 (MÁS ADELANTE, hacia la cámara)
+    truckGroup.position.set(-1.5, 0.02, 1.5);
     truckGroup.scale.set(0.12, 0.12, 0.12);
     
     const glowLayers = [
@@ -522,7 +527,7 @@ function ShieldLogo() {
   });
   
   return (
-    <group ref={groupRef} scale={0.20} position={[-2.15, 0, 0]}> {/* ⬅️ MOVIDO A LA IZQUIERDA */}
+    <group ref={groupRef} scale={0.20} position={[-2.15, 0, 0]}>
       <mesh position={[0, 0, 0]}>
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial
