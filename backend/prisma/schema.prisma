@@ -219,9 +219,9 @@ model Negociacion {
   // Detalles acordados
   tipoProducto      TipoProducto
   cantidad          Int                // cantidad negociada (puede ser menor a la oferta)
-  precioUnitario    Decimal            @db.Decimal(10, 2)
   incluyeFlete      Boolean            @default(false)
-  costoFlete        Decimal?           @db.Decimal(10, 2)
+  precioUnitario    Decimal            @db.Decimal(15, 2)
+  costoFlete        Decimal?           @db.Decimal(15, 2)
   
   // Ubicación de entrega
   direccionEntrega  String
@@ -313,10 +313,10 @@ model Factura {
   negociacion       Negociacion     @relation(fields: [negociacionId], references: [id])
   
   // Montos
-  subtotal          Decimal         @db.Decimal(10, 2)  // cantidad × precio
-  costoFlete        Decimal         @db.Decimal(10, 2)
-  comisionPlataforma Decimal        @db.Decimal(10, 2)  // % configurado
-  total             Decimal         @db.Decimal(10, 2)
+  subtotal          Decimal         @db.Decimal(15, 2)
+costoFlete        Decimal         @db.Decimal(15, 2)
+comisionPlataforma Decimal        @db.Decimal(15, 2)
+total             Decimal         @db.Decimal(15, 2)
   
   // Pago
   estadoPago        EstadoPago      @default(PENDIENTE)
