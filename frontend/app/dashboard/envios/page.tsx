@@ -693,6 +693,7 @@ function TarjetaEnvio({ negociacion, userId, isAdmin, onPagar, onAdmin }: {
   const progreso  = envio.progresoEstimado ?? estadoCfg.progreso;
   const total     = negociacion.cantidad * Number(negociacion.precioUnitario);
   const esComprador = Number(negociacion.comprador.id) === Number(userId);
+  console.log('esComprador:', esComprador, 'comprador.id:', negociacion.comprador.id, 'userId:', userId);
 
   return (
     <Card className="border-0 shadow-lg hover:shadow-xl transition-shadow">
