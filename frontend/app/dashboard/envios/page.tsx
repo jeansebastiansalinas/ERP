@@ -692,7 +692,7 @@ function TarjetaEnvio({ negociacion, userId, isAdmin, onPagar, onAdmin }: {
   const estadoCfg = ESTADO_ENVIO_CFG[envio.estadoEnvio] ?? ESTADO_ENVIO_CFG.PENDIENTE;
   const progreso  = envio.progresoEstimado ?? estadoCfg.progreso;
   const total     = negociacion.cantidad * Number(negociacion.precioUnitario);
-  const esComprador = negociacion.comprador.id === userId;
+  const esComprador = Number(negociacion.comprador.id) === Number(userId);
 
   return (
     <Card className="border-0 shadow-lg hover:shadow-xl transition-shadow">
